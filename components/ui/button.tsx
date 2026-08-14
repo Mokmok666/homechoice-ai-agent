@@ -1,0 +1,2 @@
+import * as React from "react"; import { Slot } from "@radix-ui/react-slot"; import { cn } from "@/lib/utils";
+export function Button({className,asChild=false,...props}:React.ButtonHTMLAttributes<HTMLButtonElement>&{asChild?:boolean}){const Comp=asChild?Slot:"button";return <Comp className={cn("inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-[#75886d] px-7 text-sm font-medium text-white transition hover:bg-[#64775d] focus:outline-none focus:ring-2 focus:ring-[#75886d]/40",className)} {...props}/>}
