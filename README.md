@@ -12,6 +12,24 @@
 
 当前为 **Phase 1 — Static UI + Mock Data**。不得在没有明确指示的情况下更换技术栈或引入额外框架。
 
+## Phase 0.5 — Product Foundation
+
+产品基础与工程规范已经建立：
+
+- Product requirement documentation
+- User flow definition
+- Data model planning
+- Engineering rules
+
+相关文档位于 [`docs/`](./docs/)：
+
+- [`PRODUCT_REQUIREMENTS.md`](./docs/PRODUCT_REQUIREMENTS.md)
+- [`USER_FLOW.md`](./docs/USER_FLOW.md)
+- [`DATA_MODEL.md`](./docs/DATA_MODEL.md)
+- [`PROJECT_RULES.md`](./docs/PROJECT_RULES.md)
+
+未来所有 Codex 或其他 AI Coding Agent 在修改项目代码前，都必须阅读并遵守 `docs/PROJECT_RULES.md`。
+
 ## Run
 
 ```bash
