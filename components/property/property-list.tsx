@@ -99,7 +99,7 @@ export function PropertyList() {
                   </div>
 
                   <div className="mt-5 grid grid-cols-3 gap-3 border-y border-[#eceae5] py-4">
-                    <div><span className="block text-xs text-[#92938f]">总价</span><b className="mt-1 block font-serif text-xl text-[#53674d]">{property.totalPrice} 万</b></div>
+                    <div><span className="block text-xs text-[#92938f]">预期成交价</span><b className="mt-1 block font-serif text-xl text-[#53674d]">{property.totalPrice} 万</b></div>
                     <div><span className="block text-xs text-[#92938f]">面积</span><b className="mt-1 block text-sm">{property.area}㎡</b></div>
                     <div><span className="block text-xs text-[#92938f]">户型</span><b className="mt-1 block text-sm">{property.layout}</b></div>
                   </div>

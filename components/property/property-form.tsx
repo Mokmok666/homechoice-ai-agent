@@ -64,9 +64,9 @@ function validateForm(form: PropertyFormState): FormErrors {
   }
 
   const totalPrice = Number(form.totalPrice);
-  if (!form.totalPrice.trim()) errors.totalPrice = "请输入总价。";
+  if (!form.totalPrice.trim()) errors.totalPrice = "请输入预期成交总价。";
   else if (!Number.isFinite(totalPrice) || totalPrice <= 0) {
-    errors.totalPrice = "总价必须是大于 0 的数字。";
+    errors.totalPrice = "预期成交总价必须是大于 0 的数字。";
   }
 
   const area = Number(form.area);
@@ -207,13 +207,14 @@ export function PropertyForm() {
 
       <Card>
         <CardHeader className="border-b border-[#eceae5] px-6 py-5 sm:px-8">
-          <CardTitle>价格与户型</CardTitle><CardDescription>总价单位为万元，面积单位为平方米。</CardDescription>
+          <CardTitle>价格与户型</CardTitle><CardDescription>预期成交价单位为万元，面积单位为平方米。</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-6 px-6 py-7 sm:grid-cols-2 sm:px-8">
           <div>
-            <Label htmlFor="totalPrice">房源总价（万元）*</Label>
-            <Input id="totalPrice" className="mt-2" type="number" min="0" step="0.01" inputMode="decimal" value={form.totalPrice} onChange={(e) => updateField("totalPrice", e.target.value)} placeholder="例如：220" {...inputErrorProps("totalPrice")} />
+            <Label htmlFor="totalPrice">预期成交总价（万元）*</Label>
+            <Input id="totalPrice" className="mt-2" type="number" min="0" step="0.01" inputMode="decimal" value={form.totalPrice} onChange={(e) => updateField("totalPrice", e.target.value)} placeholder="例如：220" aria-describedby={errors.totalPrice ? "totalPrice-error totalPrice-help" : "totalPrice-help"} aria-invalid={Boolean(errors.totalPrice)} />
             <FieldError id="totalPrice-error" message={errors.totalPrice} />
+            <p id="totalPrice-help" className="mt-2 text-xs leading-5 text-[#777a74]">可根据与业主/中介沟通后的价格填写；若尚未谈价，可结合近期成交估算。</p>
           </div>
           <div>
             <Label htmlFor="area">建筑面积（㎡）*</Label>
