@@ -3,16 +3,19 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, ArrowRight, Database } from "lucide-react";
+import { AIAnalysisPanel } from "@/components/ai/ai-analysis-panel";
 import { DecisionPropertyCard } from "@/components/decision/decision-property-card";
 import { Button } from "@/components/ui/button";
 import { BUYER_PREFERENCES_STORAGE_KEY, loadBuyerPreferences } from "@/lib/buyer-preferences-storage";
 import { runDecisionEngine } from "@/lib/decision/engine";
 import { getProperties, PROPERTY_STORAGE_KEY } from "@/lib/property-storage";
+import type { BuyerPreferences } from "@/types/buyer-preferences";
 import type { DecisionEngineResult } from "@/types/decision";
 import type { Property } from "@/types/property";
 
 interface ResultsState {
   properties: Property[];
+  preferences: BuyerPreferences | null;
   engine: DecisionEngineResult | null;
   message: string | null;
 }
@@ -24,7 +27,7 @@ const RECOMMENDATION_LABELS = {
 } as const;
 
 export function DecisionResults() {
-  const [state, setState] = useState<ResultsState>({ properties: [], engine: null, message: null });
+  const [state, setState] = useState<ResultsState>({ properties: [], preferences: null, engine: null, message: null });
   const [isLoading, setIsLoading] = useState(true);
 
   const refresh = useCallback(() => {
@@ -33,6 +36,7 @@ export function DecisionResults() {
     if (preferencesResult.status !== "valid") {
       setState({
         properties: manualProperties,
+        preferences: null,
         engine: null,
         message: preferencesResult.status === "invalid" ? preferencesResult.message : "请先完成并保存购房偏好。",
       });
@@ -40,7 +44,7 @@ export function DecisionResults() {
       return;
     }
     if (manualProperties.length === 0) {
-      setState({ properties: [], engine: null, message: "当前没有可用于真实分析的手动录入房源。演示 Mock 房源不会参与真实排序。" });
+      setState({ properties: [], preferences: preferencesResult.preferences, engine: null, message: "当前没有可用于真实分析的手动录入房源。演示 Mock 房源不会参与真实排序。" });
       setIsLoading(false);
       return;
     }
@@ -48,9 +52,9 @@ export function DecisionResults() {
     const asOfDate = new Date().toISOString().slice(0, 10);
     try {
       const engine = runDecisionEngine({ properties: manualProperties, preferences: preferencesResult.preferences, asOfDate });
-      setState({ properties: manualProperties, engine, message: null });
+      setState({ properties: manualProperties, preferences: preferencesResult.preferences, engine, message: null });
     } catch (error) {
-      setState({ properties: manualProperties, engine: null, message: error instanceof Error ? error.message : "无法生成分析结果。" });
+      setState({ properties: manualProperties, preferences: preferencesResult.preferences, engine: null, message: error instanceof Error ? error.message : "无法生成分析结果。" });
     }
     setIsLoading(false);
   }, []);
@@ -160,6 +164,14 @@ export function DecisionResults() {
           </div>
           <Link href={`/results/${winner.propertyId}`} className="mt-6 inline-flex items-center gap-2 text-sm text-[#607158]">查看完整 15 维证据 <ArrowRight size={16} /></Link>
         </section>
+      )}
+
+      {state.preferences && (
+        <AIAnalysisPanel
+          properties={state.properties}
+          preferences={state.preferences}
+          engine={state.engine}
+        />
       )}
     </>
   );
