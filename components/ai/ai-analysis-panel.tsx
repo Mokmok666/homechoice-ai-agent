@@ -67,6 +67,7 @@ function buildRequests(
 export function AIAnalysisPanel({ properties, preferences, engine }: AIAnalysisPanelProps) {
   const [state, setState] = useState<PanelState>({ status: "idle" });
   const abortControllerRef = useRef<AbortController | null>(null);
+  const isGeneratingRef = useRef(false);
   const requests = useMemo(
     () => buildRequests(properties, preferences, engine),
     [properties, preferences, engine],
@@ -76,41 +77,57 @@ export function AIAnalysisPanel({ properties, preferences, engine }: AIAnalysisP
   useEffect(() => {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
+    isGeneratingRef.current = false;
     setState({ status: "idle" });
   }, [requestIdentity]);
 
   useEffect(() => () => abortControllerRef.current?.abort(), []);
 
   async function generateAnalysis(): Promise<void> {
-    if (requests.length === 0) return;
-    abortControllerRef.current?.abort();
+    if (requests.length === 0 || isGeneratingRef.current) return;
+    isGeneratingRef.current = true;
     const controller = new AbortController();
     abortControllerRef.current = controller;
     setState({ status: "loading" });
 
-    const responses = await Promise.all(
-      requests.map(async (item) => ({
-        item,
-        response: await requestAIAnalysis(item.request, { signal: controller.signal }),
-      })),
-    );
-    if (controller.signal.aborted) return;
+    try {
+      const responses = await Promise.all(
+        requests.map(async (item) => ({
+          item,
+          response: await requestAIAnalysis(item.request, { signal: controller.signal }),
+        })),
+      );
+      if (controller.signal.aborted) return;
 
-    const failed = responses.find(({ response }) => !response.ok);
-    if (failed && !failed.response.ok) {
-      setState({ status: "error", message: failed.response.error.message });
-      return;
+      const failed = responses.find(({ response }) => !response.ok);
+      if (failed && !failed.response.ok) {
+        setState({ status: "error", message: failed.response.error.message });
+        return;
+      }
+
+      setState({
+        status: "success",
+        items: responses.flatMap(({ item, response }) => response.ok
+          ? [{ propertyId: item.propertyId, propertyName: item.propertyName, analysis: response.analysis }]
+          : []),
+      });
+    } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+        isGeneratingRef.current = false;
+      }
     }
-
-    setState({
-      status: "success",
-      items: responses.flatMap(({ item, response }) => response.ok
-        ? [{ propertyId: item.propertyId, propertyName: item.propertyName, analysis: response.analysis }]
-        : []),
-    });
   }
 
   const rankingNames = requests.map((item) => item.propertyName).join(" → ");
+  const isLoading = state.status === "loading";
+  const buttonLabel = state.status === "success"
+    ? "重新生成"
+    : state.status === "error"
+      ? "重新尝试"
+      : isLoading
+        ? "生成中..."
+        : "生成AI解读";
 
   return (
     <section className="card mt-7 overflow-hidden" aria-live="polite">
@@ -126,12 +143,20 @@ export function AIAnalysisPanel({ properties, preferences, engine }: AIAnalysisP
               <p className="mt-2 text-sm leading-6 text-[#70736e]">基于当前房源、偏好和决策结果生成个性化分析</p>
             </div>
           </div>
-          {(state.status === "idle" || state.status === "error") && (
-            <Button type="button" onClick={() => void generateAnalysis()} className="shrink-0">
-              {state.status === "error" ? <RefreshCcw size={16} /> : <Sparkles size={16} />}
-              {state.status === "error" ? "重新生成" : "生成 AI 解读"}
-            </Button>
-          )}
+          <Button
+            type="button"
+            onClick={() => void generateAnalysis()}
+            className="shrink-0"
+            disabled={isLoading || requests.length === 0}
+            aria-busy={isLoading}
+          >
+            {isLoading
+              ? <LoaderCircle className="animate-spin" size={16} />
+              : state.status === "success" || state.status === "error"
+                ? <RefreshCcw size={16} />
+                : <Sparkles size={16} />}
+            {buttonLabel}
+          </Button>
         </div>
       </div>
 
@@ -142,9 +167,20 @@ export function AIAnalysisPanel({ properties, preferences, engine }: AIAnalysisP
       )}
 
       {state.status === "loading" && (
-        <div className="flex min-h-40 items-center justify-center gap-3 p-8 text-sm text-[#65725f]">
-          <LoaderCircle className="animate-spin" size={20} />
-          正在分析房源特点...
+        <div className="p-6 sm:p-8">
+          <div className="mx-auto max-w-xl rounded-2xl border border-[#e4e8e0] bg-[#f8faf6] p-5 sm:p-6">
+            <div className="flex items-center gap-3 text-[#5f7258]">
+              <LoaderCircle className="animate-spin" size={20} />
+              <p className="font-medium">正在生成AI购房解读</p>
+            </div>
+            <ul className="mt-5 space-y-3 text-sm text-[#6c7169]">
+              <LoadingStep complete text="已读取房源信息" />
+              <LoadingStep complete text="已分析购房偏好" />
+              <LoadingStep complete text="已结合 Decision Engine 结果" />
+              <LoadingStep text="正在生成个性化建议" />
+            </ul>
+            <p className="mt-5 text-xs leading-5 text-[#8a8f87]">通常需要 15–30 秒，请保持页面开启。</p>
+          </div>
         </div>
       )}
 
@@ -192,6 +228,17 @@ export function AIAnalysisPanel({ properties, preferences, engine }: AIAnalysisP
         </div>
       )}
     </section>
+  );
+}
+
+function LoadingStep({ complete = false, text }: { complete?: boolean; text: string }) {
+  return (
+    <li className="flex items-center gap-3">
+      {complete
+        ? <span className="grid size-5 place-items-center rounded-full bg-[#718169] text-white"><Check size={13} /></span>
+        : <LoaderCircle className="animate-spin text-[#718169]" size={20} />}
+      <span>{text}</span>
+    </li>
   );
 }
 
