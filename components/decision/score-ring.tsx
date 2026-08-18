@@ -1,1 +1,1 @@
-export function ScoreRing({score,size=94}:{score:number;size?:number}){return <div className="score-ring" style={{"--score":`${score*3.6}deg`,width:size,height:size} as React.CSSProperties}><div><b>{score}</b><small>综合得分</small></div></div>}
+export function ScoreRing({score,size=94,label="综合得分"}:{score:number;size?:number;label?:string}){return <div className="score-ring" style={{"--score":`${score*3.6}deg`,width:size,height:size} as React.CSSProperties}><div><b>{score}</b><small>{label}</small></div></div>}

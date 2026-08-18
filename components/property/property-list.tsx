@@ -106,7 +106,7 @@ export function PropertyList() {
 
                   <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3 text-xs text-[#757873]">
                     <span>{property.floor}</span>
-                    <span className="flex items-center gap-1.5"><TrainFront size={14} />{property.metroDistance === null ? "地铁距离待补充" : `距地铁约 ${property.metroDistance} 米`}</span>
+                    <span className="flex items-center gap-1.5"><TrainFront size={14} />{property.metroDistance === null ? "地铁距离可进一步确认" : `距地铁约 ${property.metroDistance} 米`}</span>
                     <div className="ml-auto flex items-center gap-2">
                       <Link href={`/properties/new?id=${property.id}`} className="inline-flex size-9 items-center justify-center rounded-full border border-[#dfddd7] transition hover:bg-[#f2f1ec]" aria-label={`编辑 ${property.name}`}><Pencil size={15} /></Link>
                       <button type="button" onClick={() => handleDelete(property)} className="inline-flex size-9 items-center justify-center rounded-full border border-[#eadedb] text-[#9b5a50] transition hover:bg-[#fcf2f0]" aria-label={`删除 ${property.name}`}><Trash2 size={15} /></button>

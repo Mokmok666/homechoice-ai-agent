@@ -45,12 +45,21 @@ AnalysisResult N ─── N Property
 | `location` | `text nullable` | 房源位置描述，MVP 不要求精确坐标 |
 | `listing_price` | `numeric(12,2) nullable` | 挂牌价格，单位由 `currency` 和业务约定统一 |
 | `expected_price` | `numeric(12,2) nullable` | 用户认为的真实可能成交价格 |
+| `comparable_transactions` | `jsonb` | 用户录入的近期成交参考，包含价格、面积、日期、来源与确认状态 |
 | `currency` | `char(3)` | ISO 货币代码，默认 `CNY` |
 | `area` | `numeric(8,2) nullable` | 建筑面积，单位平方米 |
 | `layout` | `text nullable` | 户型，例如三室两厅 |
-| `floor` | `text nullable` | 楼层描述 |
-| `orientation` | `text nullable` | 朝向 |
-| `completion_year` | `smallint nullable` | 房龄或交付年份 |
+| `rooms` | `smallint` | 卧室数量；旧记录无法识别时为 0 |
+| `living_rooms` | `smallint` | 客厅数量；旧记录无法识别时为 0 |
+| `bathrooms` | `smallint` | 卫生间数量，范围 0–5 |
+| `custom_layout` | `text nullable` | 选择“其他”户型时保留的自定义描述 |
+| `floor` | `text nullable` | 向后兼容的楼层展示描述 |
+| `floor_level` | `text nullable` | 低层、中低层、中层、中高层或高层的结构化枚举 |
+| `floor_number` | `smallint nullable` | 实际所在楼层 |
+| `total_floors` | `smallint nullable` | 建筑总楼层 |
+| `orientation` | `text nullable` | 结构化朝向枚举 |
+| `custom_orientation` | `text nullable` | 选择“其他”朝向时保留的自定义描述 |
+| `completion_year` | `smallint nullable` | 交付年份，用于按分析日期确定性计算楼龄 |
 | `decoration` | `text nullable` | 装修状态 |
 | `images` | `jsonb` | 房源图片或截图文件引用列表 |
 | `source_type` | `text` | 信息来源，例如 `manual` 或 `screenshot` |
@@ -72,9 +81,8 @@ AnalysisResult N ─── N Property
 | `user_id` | `uuid` | 所属用户，关联 `User.id` |
 | `name` | `text` | 偏好方案名称，例如“通勤优先方案” |
 | `purchase_purpose` | `text` | 自住、自住兼投资或投资 |
-| `budget_min` | `numeric(12,2) nullable` | 最低预算 |
-| `budget_max` | `numeric(12,2) nullable` | 最高预算 |
-| `education_requirement` | `text` | 无、未来可能需要或非常重要 |
+| `maximum_budget` | `numeric(12,2)` | 家庭可接受的单套房源最高总价，仅用于预算匹配 |
+| `education_need` | `text` | 暂无、当前或未来教育需求 |
 | `education_stages` | `text[]` | 幼儿园、小学、初中、高中等阶段 |
 | `primary_work_location` | `jsonb nullable` | 主要工作地点的结构化描述 |
 | `partner_work_location` | `jsonb nullable` | 伴侣工作地点的结构化描述 |
@@ -105,6 +113,8 @@ AnalysisResult N ─── N Property
 | `key_risks` | `jsonb` | 风险与待确认事项 |
 | `confidence_level` | `text` | 低、中、高等推荐可信度 |
 | `confidence_reasons` | `jsonb` | 影响可信度的信息缺口 |
+| `data_completeness` | `numeric(5,2)` | 当前阶段可采集事实与偏好中的数据完整度，不受未来 AI 维度拖累 |
+| `analysis_confidence` | `text` | 阶段性或较充分，独立于已知信息匹配分数 |
 | `explanation` | `text nullable` | AI 生成的自然语言说明 |
 | `engine_version` | `text` | 决策引擎版本，保证结果可追溯 |
 | `prompt_version` | `text nullable` | AI 解释提示词版本 |
@@ -120,4 +130,3 @@ AnalysisResult N ─── N Property
 - API 密钥不得存储在以上任何业务表中；
 - 历史分析使用快照和版本号，保证结果可解释、可复现；
 - 对用户上传图片和个人偏好使用最小化收集与用户级访问控制。
-

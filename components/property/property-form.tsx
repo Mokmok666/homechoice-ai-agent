@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
-import { ArrowLeft, Building2, MapPin, School, TrainFront } from "lucide-react";
+import { ArrowLeft, Building2, MapPin, Plus, School, TrainFront, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -16,7 +16,59 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { createProperty, getProperty, updateProperty } from "@/lib/property-storage";
-import type { PropertyInput } from "@/types/property";
+import type { ComparableTransaction, FloorLevel, Orientation, PropertyInput } from "@/types/property";
+
+const CITY_DISTRICTS: Record<string, string[]> = {
+  "广州": ["天河区", "海珠区", "黄埔区", "番禺区", "荔湾区", "越秀区", "白云区", "南沙区"],
+  "佛山": ["禅城区", "南海区", "顺德区", "三水区", "高明区"],
+};
+
+const LAYOUT_OPTIONS = [
+  "1室1厅1卫",
+  "2室1厅1卫",
+  "2室2厅1卫",
+  "2室2厅2卫",
+  "3室1厅1卫",
+  "3室2厅1卫",
+  "3室2厅2卫",
+  "4室2厅2卫",
+  "4室2厅3卫",
+  "5室及以上",
+  "其他",
+] as const;
+
+const FLOOR_LEVEL_OPTIONS: Array<{ value: FloorLevel; label: string }> = [
+  { value: "low", label: "低层" },
+  { value: "lower_middle", label: "中低层" },
+  { value: "middle", label: "中层" },
+  { value: "upper_middle", label: "中高层" },
+  { value: "high", label: "高层" },
+];
+
+const ORIENTATION_OPTIONS: Array<{ value: Orientation; label: string }> = [
+  { value: "south", label: "南向" },
+  { value: "southeast", label: "东南向" },
+  { value: "southwest", label: "西南向" },
+  { value: "east", label: "东向" },
+  { value: "west", label: "西向" },
+  { value: "northeast", label: "东北向" },
+  { value: "northwest", label: "西北向" },
+  { value: "north", label: "北向" },
+  { value: "north_south", label: "南北通透" },
+  { value: "multiple", label: "多朝向" },
+  { value: "other", label: "其他" },
+];
+
+const SELECT_CLASS = "mt-2 h-12 w-full rounded-lg border border-[#deddd8] bg-white px-4 text-sm outline-none focus:border-[#7d8f75] focus:ring-2 focus:ring-[#7d8f75]/10";
+
+interface ComparableFormRow {
+  id: string;
+  price: string;
+  area: string;
+  transactionDate: string;
+  source: string;
+  confirmed: boolean;
+}
 
 interface PropertyFormState {
   name: string;
@@ -26,11 +78,21 @@ interface PropertyFormState {
   totalPrice: string;
   area: string;
   layout: string;
-  floor: string;
+  customLayout: string;
+  floorLevel: string;
+  floorNumber: string;
+  totalFloors: string;
   metroDistance: string;
   schoolInformation: string;
   propertyManagementInformation: string;
+  listingPrice: string;
+  deliveryYear: string;
+  orientation: string;
+  customOrientation: string;
+  comparableTransactions: ComparableFormRow[];
 }
+
+type PropertyTextField = Exclude<keyof PropertyFormState, "comparableTransactions">;
 
 type FormErrors = Partial<Record<keyof PropertyFormState | "form", string>>;
 
@@ -42,21 +104,50 @@ const EMPTY_FORM: PropertyFormState = {
   totalPrice: "",
   area: "",
   layout: "",
-  floor: "",
+  customLayout: "",
+  floorLevel: "",
+  floorNumber: "",
+  totalFloors: "",
   metroDistance: "",
   schoolInformation: "",
   propertyManagementInformation: "",
+  listingPrice: "",
+  deliveryYear: "",
+  orientation: "",
+  customOrientation: "",
+  comparableTransactions: [],
 };
+
+function createComparableRow(): ComparableFormRow {
+  const id = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `comparable-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return { id, price: "", area: "", transactionDate: "", source: "", confirmed: false };
+}
+
+function getLayoutSelection(layout: string, customLayout?: string | null): string {
+  if (customLayout) return "其他";
+  return LAYOUT_OPTIONS.includes(layout as (typeof LAYOUT_OPTIONS)[number]) ? layout : "其他";
+}
+
+function parseLayoutCounts(layout: string): { rooms: number; livingRooms: number; bathrooms: number } {
+  const match = layout.match(/(\d+)室(?:及以上)?(?:(\d+)厅)?(?:(\d+)卫)?/);
+  return {
+    rooms: match ? Number(match[1]) : 0,
+    livingRooms: match?.[2] ? Number(match[2]) : 0,
+    bathrooms: match?.[3] ? Number(match[3]) : 0,
+  };
+}
 
 function validateForm(form: PropertyFormState): FormErrors {
   const errors: FormErrors = {};
-  const requiredFields: Array<[keyof PropertyFormState, string]> = [
+  const requiredFields: Array<[PropertyTextField, string]> = [
     ["name", "请输入房源名称。"],
-    ["city", "请输入城市。"],
-    ["district", "请输入行政区。"],
+    ["city", "请选择城市。"],
+    ["district", "请选择行政区。"],
     ["address", "请输入详细地址。"],
-    ["layout", "请输入户型。"],
-    ["floor", "请输入楼层。"],
+    ["layout", "请选择户型。"],
+    ["floorLevel", "请选择所在楼层。"],
   ];
 
   for (const [field, message] of requiredFields) {
@@ -81,6 +172,34 @@ function validateForm(form: PropertyFormState): FormErrors {
       errors.metroDistance = "地铁距离不能小于 0。";
     }
   }
+
+  if (form.listingPrice.trim()) {
+    const listingPrice = Number(form.listingPrice);
+    if (!Number.isFinite(listingPrice) || listingPrice <= 0) errors.listingPrice = "挂牌价必须是大于 0 的数字。";
+  }
+  if (form.deliveryYear.trim()) {
+    const deliveryYear = Number(form.deliveryYear);
+    if (!Number.isInteger(deliveryYear) || deliveryYear < 1900 || deliveryYear > 2100) {
+      errors.deliveryYear = "请输入 1900–2100 之间的有效年份。";
+    }
+  }
+  if (form.floorNumber.trim()) {
+    const floorNumber = Number(form.floorNumber);
+    if (!Number.isInteger(floorNumber) || floorNumber <= 0) errors.floorNumber = "实际楼层必须是大于 0 的整数。";
+  }
+  if (form.totalFloors.trim()) {
+    const totalFloors = Number(form.totalFloors);
+    if (!Number.isInteger(totalFloors) || totalFloors <= 0) errors.totalFloors = "总楼层必须是大于 0 的整数。";
+  }
+  if (form.floorNumber.trim() && form.totalFloors.trim() && Number(form.floorNumber) > Number(form.totalFloors)) {
+    errors.floorNumber = "实际楼层不能高于总楼层。";
+  }
+  const invalidComparable = form.comparableTransactions.some((item) =>
+    !item.price.trim() || Number(item.price) <= 0 || !Number.isFinite(Number(item.price)) ||
+    !item.area.trim() || Number(item.area) <= 0 || !Number.isFinite(Number(item.area)) ||
+    !item.transactionDate || !item.source.trim(),
+  );
+  if (invalidComparable) errors.comparableTransactions = "每条成交参考都需要有效的价格、面积、日期和来源。";
   return errors;
 }
 
@@ -112,26 +231,53 @@ export function PropertyForm() {
       address: property.address,
       totalPrice: String(property.totalPrice),
       area: String(property.area),
-      layout: property.layout,
-      floor: property.floor,
+      layout: getLayoutSelection(property.layout, property.customLayout),
+      customLayout: property.customLayout ?? (getLayoutSelection(property.layout, property.customLayout) === "其他" ? property.layout : ""),
+      floorLevel: property.floorLevel ?? "",
+      floorNumber: property.floorNumber === null || property.floorNumber === undefined ? "" : String(property.floorNumber),
+      totalFloors: property.totalFloors === null || property.totalFloors === undefined ? "" : String(property.totalFloors),
       metroDistance: property.metroDistance === null ? "" : String(property.metroDistance),
       schoolInformation: property.schoolInformation,
       propertyManagementInformation: property.propertyManagementInformation,
+      listingPrice: property.listingPrice === null || property.listingPrice === undefined ? "" : String(property.listingPrice),
+      deliveryYear: property.deliveryYear === null || property.deliveryYear === undefined ? "" : String(property.deliveryYear),
+      orientation: property.orientation ?? "",
+      customOrientation: property.customOrientation ?? "",
+      comparableTransactions: (property.comparableTransactions ?? []).map((item) => ({
+        ...item,
+        price: String(item.price),
+        area: String(item.area),
+      })),
     });
   }, []);
 
-  function updateField(field: keyof PropertyFormState, value: string) {
+  function updateField(field: PropertyTextField, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
     if (errors[field]) {
       setErrors((current) => ({ ...current, [field]: undefined, form: undefined }));
     }
   }
 
-  function inputErrorProps(field: keyof PropertyFormState) {
+  function inputErrorProps(field: PropertyTextField) {
     return {
       "aria-invalid": Boolean(errors[field]),
       "aria-describedby": errors[field] ? `${field}-error` : undefined,
     };
+  }
+
+  function handleCityChange(city: string) {
+    setForm((current) => ({ ...current, city, district: "" }));
+    setErrors((current) => ({ ...current, city: undefined, district: undefined, form: undefined }));
+  }
+
+  function updateComparable(id: string, field: keyof Omit<ComparableFormRow, "id">, value: string | boolean) {
+    setForm((current) => ({
+      ...current,
+      comparableTransactions: current.comparableTransactions.map((item) =>
+        item.id === id ? { ...item, [field]: value } : item,
+      ),
+    }));
+    if (errors.comparableTransactions) setErrors((current) => ({ ...current, comparableTransactions: undefined }));
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -142,6 +288,17 @@ export function PropertyForm() {
       return;
     }
 
+    const floorLevel = form.floorLevel as FloorLevel;
+    const floorLabel = FLOOR_LEVEL_OPTIONS.find((option) => option.value === floorLevel)?.label ?? "";
+    const floorDetail = form.floorNumber.trim() && form.totalFloors.trim()
+      ? `${form.floorNumber}/${form.totalFloors}层`
+      : form.floorNumber.trim()
+        ? `${form.floorNumber}层`
+        : form.totalFloors.trim()
+          ? `共${form.totalFloors}层`
+          : "";
+    const selectedLayout = form.layout === "其他" ? form.customLayout.trim() || "其他" : form.layout;
+    const layoutCounts = parseLayoutCounts(selectedLayout);
     const input: PropertyInput = {
       name: form.name.trim(),
       city: form.city.trim(),
@@ -149,11 +306,30 @@ export function PropertyForm() {
       address: form.address.trim(),
       totalPrice: Number(form.totalPrice),
       area: Number(form.area),
-      layout: form.layout.trim(),
-      floor: form.floor.trim(),
+      layout: selectedLayout,
+      rooms: layoutCounts.rooms,
+      livingRooms: layoutCounts.livingRooms,
+      bathrooms: layoutCounts.bathrooms,
+      customLayout: form.layout === "其他" ? form.customLayout.trim() || null : null,
+      floor: floorDetail ? `${floorLabel} · ${floorDetail}` : floorLabel,
+      floorLevel,
+      floorNumber: form.floorNumber.trim() ? Number(form.floorNumber) : null,
+      totalFloors: form.totalFloors.trim() ? Number(form.totalFloors) : null,
       metroDistance: form.metroDistance.trim() ? Number(form.metroDistance) : null,
       schoolInformation: form.schoolInformation.trim(),
       propertyManagementInformation: form.propertyManagementInformation.trim(),
+      listingPrice: form.listingPrice.trim() ? Number(form.listingPrice) : null,
+      deliveryYear: form.deliveryYear.trim() ? Number(form.deliveryYear) : null,
+      orientation: form.orientation ? form.orientation as Orientation : null,
+      customOrientation: form.orientation === "other" ? form.customOrientation.trim() || null : null,
+      comparableTransactions: form.comparableTransactions.map((item): ComparableTransaction => ({
+        id: item.id,
+        price: Number(item.price),
+        area: Number(item.area),
+        transactionDate: item.transactionDate,
+        source: item.source.trim(),
+        confirmed: item.confirmed,
+      })),
     };
 
     setIsSubmitting(true);
@@ -166,6 +342,9 @@ export function PropertyForm() {
       setIsSubmitting(false);
     }
   }
+
+  const districtOptions = CITY_DISTRICTS[form.city] ?? (form.district ? [form.district] : []);
+  const isLegacyCity = Boolean(form.city && !CITY_DISTRICTS[form.city]);
 
   return (
     <form onSubmit={handleSubmit} noValidate className="mt-7 space-y-6">
@@ -186,12 +365,20 @@ export function PropertyForm() {
           </div>
           <div>
             <Label htmlFor="city">城市 *</Label>
-            <Input id="city" className="mt-2" value={form.city} onChange={(e) => updateField("city", e.target.value)} placeholder="例如：广州" {...inputErrorProps("city")} />
+            <select id="city" className={SELECT_CLASS} value={form.city} onChange={(event) => handleCityChange(event.target.value)} {...inputErrorProps("city")}>
+              <option value="">请选择城市</option>
+              <option value="广州">广州</option>
+              <option value="佛山">佛山</option>
+              {isLegacyCity && <option value={form.city}>{form.city}（原记录）</option>}
+            </select>
             <FieldError id="city-error" message={errors.city} />
           </div>
           <div>
             <Label htmlFor="district">行政区 *</Label>
-            <Input id="district" className="mt-2" value={form.district} onChange={(e) => updateField("district", e.target.value)} placeholder="例如：天河区" {...inputErrorProps("district")} />
+            <select id="district" className={SELECT_CLASS} value={form.district} disabled={!form.city} onChange={(event) => updateField("district", event.target.value)} {...inputErrorProps("district")}>
+              <option value="">{form.city ? "请选择行政区" : "请先选择城市"}</option>
+              {districtOptions.map((district) => <option key={district} value={district}>{district}</option>)}
+            </select>
             <FieldError id="district-error" message={errors.district} />
           </div>
           <div className="lg:col-span-2">
@@ -201,6 +388,7 @@ export function PropertyForm() {
               <Input id="address" className="pl-11" value={form.address} onChange={(e) => updateField("address", e.target.value)} placeholder="请输入街道、道路或楼栋信息" {...inputErrorProps("address")} />
             </div>
             <FieldError id="address-error" message={errors.address} />
+            <p className="mt-2 text-xs leading-5 text-[#777a74]">详细地址将在后续阶段支持地图搜索与位置确认。</p>
           </div>
         </CardContent>
       </Card>
@@ -221,15 +409,32 @@ export function PropertyForm() {
             <Input id="area" className="mt-2" type="number" min="0" step="0.01" inputMode="decimal" value={form.area} onChange={(e) => updateField("area", e.target.value)} placeholder="例如：89.5" {...inputErrorProps("area")} />
             <FieldError id="area-error" message={errors.area} />
           </div>
-          <div>
+          <div className="sm:col-span-2">
             <Label htmlFor="layout">户型 *</Label>
-            <Input id="layout" className="mt-2" value={form.layout} onChange={(e) => updateField("layout", e.target.value)} placeholder="例如：3室2厅2卫" {...inputErrorProps("layout")} />
+            <select id="layout" className={SELECT_CLASS} value={form.layout} onChange={(event) => updateField("layout", event.target.value)} {...inputErrorProps("layout")}>
+              <option value="">请选择户型</option>
+              {LAYOUT_OPTIONS.map((layout) => <option key={layout} value={layout}>{layout}</option>)}
+            </select>
             <FieldError id="layout-error" message={errors.layout} />
+            {form.layout === "其他" && <Input id="customLayout" className="mt-3" value={form.customLayout} onChange={(event) => updateField("customLayout", event.target.value)} placeholder="自定义户型（选填）" aria-label="自定义户型" />}
           </div>
           <div>
-            <Label htmlFor="floor">楼层 *</Label>
-            <Input id="floor" className="mt-2" value={form.floor} onChange={(e) => updateField("floor", e.target.value)} placeholder="例如：中高层 / 共 32 层" {...inputErrorProps("floor")} />
-            <FieldError id="floor-error" message={errors.floor} />
+            <Label htmlFor="floorLevel">所在楼层 *</Label>
+            <select id="floorLevel" className={SELECT_CLASS} value={form.floorLevel} onChange={(event) => updateField("floorLevel", event.target.value)} {...inputErrorProps("floorLevel")}>
+              <option value="">请选择所在楼层</option>
+              {FLOOR_LEVEL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+            <FieldError id="floorLevel-error" message={errors.floorLevel} />
+          </div>
+          <div>
+            <Label htmlFor="floorNumber">实际楼层（选填）</Label>
+            <Input id="floorNumber" className="mt-2" type="number" min="1" step="1" inputMode="numeric" value={form.floorNumber} onChange={(event) => updateField("floorNumber", event.target.value)} placeholder="例如：25" {...inputErrorProps("floorNumber")} />
+            <FieldError id="floorNumber-error" message={errors.floorNumber} />
+          </div>
+          <div>
+            <Label htmlFor="totalFloors">总楼层（选填）</Label>
+            <Input id="totalFloors" className="mt-2" type="number" min="1" step="1" inputMode="numeric" value={form.totalFloors} onChange={(event) => updateField("totalFloors", event.target.value)} placeholder="例如：32" {...inputErrorProps("totalFloors")} />
+            <FieldError id="totalFloors-error" message={errors.totalFloors} />
           </div>
         </CardContent>
       </Card>
@@ -255,6 +460,62 @@ export function PropertyForm() {
           <div>
             <Label htmlFor="propertyManagementInformation">物业管理信息</Label>
             <Textarea id="propertyManagementInformation" className="mt-2" value={form.propertyManagementInformation} onChange={(e) => updateField("propertyManagementInformation", e.target.value)} placeholder="例如：保利物业，公区维护良好，物业费 4.8 元/㎡/月" />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="border-b border-[#eceae5] px-6 py-5 sm:px-8">
+          <CardTitle>补充分析信息</CardTitle>
+          <CardDescription>全部选填。仅记录客观事实；信息不足会降低覆盖率，不会被自动记为低分。</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-7 px-6 py-7 sm:px-8">
+          <div className="grid gap-6 sm:grid-cols-3">
+            <div>
+              <Label htmlFor="listingPrice">挂牌价（万元）</Label>
+              <Input id="listingPrice" className="mt-2" type="number" min="0" step="0.01" inputMode="decimal" value={form.listingPrice} onChange={(event) => updateField("listingPrice", event.target.value)} placeholder="例如：228" {...inputErrorProps("listingPrice")} />
+              <FieldError id="listingPrice-error" message={errors.listingPrice} />
+            </div>
+            <div>
+              <Label htmlFor="deliveryYear">交付年份</Label>
+              <Input id="deliveryYear" className="mt-2" type="number" min="1900" max="2100" step="1" inputMode="numeric" value={form.deliveryYear} onChange={(event) => updateField("deliveryYear", event.target.value)} placeholder="例如：2018" {...inputErrorProps("deliveryYear")} />
+              <FieldError id="deliveryYear-error" message={errors.deliveryYear} />
+            </div>
+            <div>
+              <Label htmlFor="orientation">朝向</Label>
+              <select id="orientation" className={SELECT_CLASS} value={form.orientation} onChange={(event) => updateField("orientation", event.target.value)}>
+                <option value="">请选择朝向（选填）</option>
+                {ORIENTATION_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+              {form.orientation === "other" && <Input id="customOrientation" className="mt-3" value={form.customOrientation} onChange={(event) => updateField("customOrientation", event.target.value)} placeholder="自定义朝向（选填）" aria-label="自定义朝向" />}
+            </div>
+          </div>
+
+          <div className="border-t border-[#eceae5] pt-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <Label>近期成交参考</Label>
+                <p className="mt-1 text-xs leading-5 text-[#777a74]">至少 3 条近 24 个月且已确认的记录，才能计算成交价合理性。</p>
+              </div>
+              <Button type="button" className="bg-white text-[#4f5f49] ring-1 ring-[#dcdad4] hover:bg-[#f3f4ef]" onClick={() => setForm((current) => ({ ...current, comparableTransactions: [...current.comparableTransactions, createComparableRow()] }))}>
+                <Plus size={16} /> 添加成交参考
+              </Button>
+            </div>
+            <FieldError id="comparableTransactions-error" message={errors.comparableTransactions} />
+
+            <div className="mt-4 space-y-3">
+              {form.comparableTransactions.map((item, index) => (
+                <div key={item.id} className="grid gap-3 rounded-xl border border-[#e6e4de] bg-[#faf9f6] p-4 md:grid-cols-[1fr_1fr_1.2fr_1.4fr_auto_auto] md:items-end">
+                  <div><Label htmlFor={`comparable-price-${item.id}`}>成交价（万）</Label><Input id={`comparable-price-${item.id}`} className="mt-2" type="number" min="0" step="0.01" value={item.price} onChange={(event) => updateComparable(item.id, "price", event.target.value)} /></div>
+                  <div><Label htmlFor={`comparable-area-${item.id}`}>面积（㎡）</Label><Input id={`comparable-area-${item.id}`} className="mt-2" type="number" min="0" step="0.01" value={item.area} onChange={(event) => updateComparable(item.id, "area", event.target.value)} /></div>
+                  <div><Label htmlFor={`comparable-date-${item.id}`}>成交日期</Label><Input id={`comparable-date-${item.id}`} className="mt-2" type="date" value={item.transactionDate} onChange={(event) => updateComparable(item.id, "transactionDate", event.target.value)} /></div>
+                  <div><Label htmlFor={`comparable-source-${item.id}`}>来源</Label><Input id={`comparable-source-${item.id}`} className="mt-2" value={item.source} onChange={(event) => updateComparable(item.id, "source", event.target.value)} placeholder="例如：中介成交记录" /></div>
+                  <label className="flex h-11 items-center gap-2 whitespace-nowrap text-xs text-[#5f625d]"><input type="checkbox" checked={item.confirmed} onChange={(event) => updateComparable(item.id, "confirmed", event.target.checked)} /> 已确认</label>
+                  <button type="button" className="grid size-11 place-items-center rounded-lg border border-[#eadedb] text-[#9b5a50] hover:bg-[#fcf2f0]" onClick={() => setForm((current) => ({ ...current, comparableTransactions: current.comparableTransactions.filter((row) => row.id !== item.id) }))} aria-label={`删除第 ${index + 1} 条成交参考`}><Trash2 size={16} /></button>
+                </div>
+              ))}
+              {form.comparableTransactions.length === 0 && <p className="rounded-xl border border-dashed border-[#dcd9d1] px-4 py-5 text-center text-xs text-[#8a8c87]">尚未添加成交参考，可稍后编辑房源补充。</p>}
+            </div>
           </div>
         </CardContent>
       </Card>
