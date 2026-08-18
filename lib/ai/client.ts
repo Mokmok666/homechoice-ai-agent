@@ -5,7 +5,9 @@ export interface AIAnalysisClientOptions {
   signal?: AbortSignal;
 }
 
-export async function requestAIAnalysis(
+const inFlightRequests = new Map<string, Promise<AIAnalysisResponse>>();
+
+async function performAIAnalysisRequest(
   request: AIAnalysisRequest,
   options: AIAnalysisClientOptions = {},
 ): Promise<AIAnalysisResponse> {
@@ -51,4 +53,20 @@ export async function requestAIAnalysis(
       },
     };
   }
+}
+
+export function requestAIAnalysis(
+  request: AIAnalysisRequest,
+  options: AIAnalysisClientOptions = {},
+): Promise<AIAnalysisResponse> {
+  const existingRequest = inFlightRequests.get(request.inputSignature);
+  if (existingRequest) return existingRequest;
+
+  const pendingRequest = performAIAnalysisRequest(request, options).finally(() => {
+    if (inFlightRequests.get(request.inputSignature) === pendingRequest) {
+      inFlightRequests.delete(request.inputSignature);
+    }
+  });
+  inFlightRequests.set(request.inputSignature, pendingRequest);
+  return pendingRequest;
 }

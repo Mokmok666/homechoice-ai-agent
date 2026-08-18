@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, LoaderCircle, RefreshCcw, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  findAIAnalysisBySignature,
+  findLatestAIAnalysisForProperty,
+  saveAIAnalysisRecord,
+} from "@/lib/ai-analysis-storage";
 import { requestAIAnalysis } from "@/lib/ai/client";
 import { projectAIAnalysisContext } from "@/lib/ai/input";
 import { createAIInputSignature } from "@/lib/ai/signature";
@@ -30,7 +35,9 @@ interface PropertyAnalysisItem {
 type PanelState =
   | { status: "idle" }
   | { status: "loading" }
-  | { status: "success"; items: PropertyAnalysisItem[] }
+  | { status: "cached"; items: PropertyAnalysisItem[] }
+  | { status: "stale" }
+  | { status: "success"; items: PropertyAnalysisItem[]; warning?: string }
   | { status: "error"; message: string };
 
 function buildRequests(
@@ -68,6 +75,7 @@ export function AIAnalysisPanel({ properties, preferences, engine }: AIAnalysisP
   const [state, setState] = useState<PanelState>({ status: "idle" });
   const abortControllerRef = useRef<AbortController | null>(null);
   const isGeneratingRef = useRef(false);
+  const generationRef = useRef(0);
   const requests = useMemo(
     () => buildRequests(properties, preferences, engine),
     [properties, preferences, engine],
@@ -75,41 +83,144 @@ export function AIAnalysisPanel({ properties, preferences, engine }: AIAnalysisP
   const requestIdentity = requests.map((item) => item.request.inputSignature).join(":");
 
   useEffect(() => {
+    generationRef.current += 1;
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     isGeneratingRef.current = false;
-    setState({ status: "idle" });
-  }, [requestIdentity]);
+    const cachedItems = requests.flatMap((item) => {
+      const record = findAIAnalysisBySignature(
+        item.propertyId,
+        item.request.inputSignature,
+        engine.engineVersion,
+      );
+      return record
+        ? [{ propertyId: item.propertyId, propertyName: item.propertyName, analysis: record.analysis }]
+        : [];
+    });
+    if (requests.length > 0 && cachedItems.length === requests.length) {
+      setState({ status: "cached", items: cachedItems });
+      return;
+    }
+
+    const hasStaleAnalysis = requests.some((item) => {
+      const previous = findLatestAIAnalysisForProperty(item.propertyId);
+      return previous !== null && (
+        previous.inputSignature !== item.request.inputSignature ||
+        previous.engineVersion !== engine.engineVersion
+      );
+    });
+    setState(hasStaleAnalysis ? { status: "stale" } : { status: "idle" });
+  }, [engine.engineVersion, requestIdentity, requests]);
 
   useEffect(() => () => abortControllerRef.current?.abort(), []);
 
-  async function generateAnalysis(): Promise<void> {
+  async function generateAnalysis(forceRefresh = false): Promise<void> {
     if (requests.length === 0 || isGeneratingRef.current) return;
+
+    if (state.status === "cached" && !forceRefresh) {
+      setState({ status: "success", items: state.items });
+      return;
+    }
+
+    const cachedItemsByProperty = new Map<string, PropertyAnalysisItem>();
+    if (!forceRefresh) {
+      requests.forEach((item) => {
+        const record = findAIAnalysisBySignature(
+          item.propertyId,
+          item.request.inputSignature,
+          engine.engineVersion,
+        );
+        if (record) {
+          cachedItemsByProperty.set(item.propertyId, {
+            propertyId: item.propertyId,
+            propertyName: item.propertyName,
+            analysis: record.analysis,
+          });
+        }
+      });
+    }
+
+    const pendingRequests = requests.filter((item) => !cachedItemsByProperty.has(item.propertyId));
+    if (pendingRequests.length === 0) {
+      setState({
+        status: "success",
+        items: requests.flatMap((item) => {
+          const cachedItem = cachedItemsByProperty.get(item.propertyId);
+          return cachedItem ? [cachedItem] : [];
+        }),
+      });
+      return;
+    }
+
     isGeneratingRef.current = true;
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
     const controller = new AbortController();
     abortControllerRef.current = controller;
     setState({ status: "loading" });
 
     try {
       const responses = await Promise.all(
-        requests.map(async (item) => ({
+        pendingRequests.map(async (item) => ({
           item,
           response: await requestAIAnalysis(item.request, { signal: controller.signal }),
         })),
       );
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || generationRef.current !== generation) return;
 
       const failed = responses.find(({ response }) => !response.ok);
-      if (failed && !failed.response.ok) {
-        setState({ status: "error", message: failed.response.error.message });
+      const hasMismatchedSignature = responses.some(({ item, response }) =>
+        response.ok && response.metadata.inputSignature !== item.request.inputSignature
+      );
+      if ((failed && !failed.response.ok) || hasMismatchedSignature) {
+        const previousItems = requests.flatMap((item) => {
+          const cachedItem = cachedItemsByProperty.get(item.propertyId);
+          if (cachedItem) return [cachedItem];
+          const previous = findLatestAIAnalysisForProperty(item.propertyId);
+          return previous
+            ? [{ propertyId: item.propertyId, propertyName: item.propertyName, analysis: previous.analysis }]
+            : [];
+        });
+        if (previousItems.length > 0) {
+          setState({
+            status: "success",
+            items: previousItems,
+            warning: "最新生成失败，正在展示上一次有效解读",
+          });
+        } else {
+          setState({
+            status: "error",
+            message: failed && !failed.response.ok
+              ? failed.response.error.message
+              : "AI 解读与当前房源信息不匹配，请重新尝试。",
+          });
+        }
         return;
       }
 
+      responses.forEach(({ item, response }) => {
+        if (!response.ok || response.metadata.inputSignature !== item.request.inputSignature) return;
+        const analysisItem = {
+          propertyId: item.propertyId,
+          propertyName: item.propertyName,
+          analysis: response.analysis,
+        };
+        cachedItemsByProperty.set(item.propertyId, analysisItem);
+        saveAIAnalysisRecord({
+          propertyId: item.propertyId,
+          inputSignature: item.request.inputSignature,
+          engineVersion: engine.engineVersion,
+          generatedAt: response.metadata.generatedAt,
+          analysis: response.analysis,
+        });
+      });
+
       setState({
         status: "success",
-        items: responses.flatMap(({ item, response }) => response.ok
-          ? [{ propertyId: item.propertyId, propertyName: item.propertyName, analysis: response.analysis }]
-          : []),
+        items: requests.flatMap((item) => {
+          const analysisItem = cachedItemsByProperty.get(item.propertyId);
+          return analysisItem ? [analysisItem] : [];
+        }),
       });
     } finally {
       if (abortControllerRef.current === controller) {
@@ -123,6 +234,10 @@ export function AIAnalysisPanel({ properties, preferences, engine }: AIAnalysisP
   const isLoading = state.status === "loading";
   const buttonLabel = state.status === "success"
     ? "重新生成"
+    : state.status === "cached"
+      ? "查看已有AI解读"
+      : state.status === "stale"
+        ? "重新生成"
     : state.status === "error"
       ? "重新尝试"
       : isLoading
@@ -145,7 +260,7 @@ export function AIAnalysisPanel({ properties, preferences, engine }: AIAnalysisP
           </div>
           <Button
             type="button"
-            onClick={() => void generateAnalysis()}
+            onClick={() => void generateAnalysis(state.status === "success" || state.status === "stale")}
             className="shrink-0"
             disabled={isLoading || requests.length === 0}
             aria-busy={isLoading}
@@ -163,6 +278,19 @@ export function AIAnalysisPanel({ properties, preferences, engine }: AIAnalysisP
       {state.status === "idle" && (
         <div className="p-6 text-sm leading-7 text-[#747772] sm:p-8">
           AI 只负责解释已有证据；当前匹配度、阶段性排序和推荐状态仍由 Decision Engine 决定。
+        </div>
+      )}
+
+      {state.status === "cached" && (
+        <div className="p-6 text-sm leading-7 text-[#687563] sm:p-8">
+          已找到与当前房源信息一致的有效 AI 解读，可直接查看，无需再次生成。
+        </div>
+      )}
+
+      {state.status === "stale" && (
+        <div className="flex items-start gap-3 p-6 text-sm leading-6 text-[#78684a] sm:p-8">
+          <AlertTriangle className="mt-0.5 shrink-0" size={19} />
+          <p className="font-medium">AI解读已过期，房源信息发生变化，请重新生成</p>
         </div>
       )}
 
@@ -196,6 +324,12 @@ export function AIAnalysisPanel({ properties, preferences, engine }: AIAnalysisP
 
       {state.status === "success" && (
         <div className="space-y-7 p-6 sm:p-8">
+          {state.warning && (
+            <div className="flex items-start gap-3 rounded-xl border border-[#eadfca] bg-[#faf6ed] p-4 text-sm text-[#78684a]">
+              <AlertTriangle className="mt-0.5 shrink-0" size={18} />
+              <p>{state.warning}</p>
+            </div>
+          )}
           <div className="grid gap-4 rounded-2xl bg-[#f7f6f2] p-5 md:grid-cols-2">
             <div>
               <h3 className="font-semibold">整体解读</h3>
