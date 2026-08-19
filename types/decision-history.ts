@@ -1,6 +1,7 @@
 import type { BuyerPreferences } from "./buyer-preferences";
 import type { DecisionEngineResult } from "./decision";
 import type { Property } from "./property";
+import type { PropertyIntelligence } from "./property-intelligence";
 
 export const DECISION_HISTORY_SCHEMA_VERSION = 1 as const;
 
@@ -13,6 +14,7 @@ export interface DecisionHistoryRecord {
   readonly decisionResult: DecisionEngineResult;
   readonly recommendedPropertyId: string | null;
   readonly aiOverallSummary: string | null;
+  readonly propertyIntelligence?: readonly PropertyIntelligence[];
 }
 
 export type DecisionHistoryInput = Omit<DecisionHistoryRecord, "id" | "createdAt">;

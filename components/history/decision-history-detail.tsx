@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AlertCircle, ArrowLeft, Building2, CalendarDays, MapPin, Sparkles } from "lucide-react";
 import { ScoreRing } from "@/components/decision/score-ring";
+import { PropertyIntelligenceCard } from "@/components/intelligence/property-intelligence-card";
 import { getDecisionHistoryById } from "@/lib/decision-history-storage";
 import type { DecisionHistoryRecord } from "@/types/decision-history";
 
@@ -69,6 +70,28 @@ export function DecisionHistoryDetail({ historyId }: { historyId: string }) {
 
       {record.aiOverallSummary && (
         <section className="card mt-7 p-6 sm:p-8"><h2 className="flex items-center gap-3 font-serif text-2xl"><Sparkles className="text-[#75886d]" />当时的 AI 解读摘要</h2><p className="mt-4 whitespace-pre-line text-sm leading-7 text-[#696c67]">{record.aiOverallSummary}</p></section>
+      )}
+
+      {record.propertyIntelligence && record.propertyIntelligence.length > 0 && (
+        <section className="mt-7">
+          <div className="mb-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-[#75886d]">Saved Property Intelligence</p>
+            <h2 className="mt-2 font-serif text-2xl">当时的房产智能分析</h2>
+            <p className="mt-2 text-xs leading-5 text-[#777a74]">以下内容来自保存决策时的只读快照，不会根据当前房源资料重新生成。</p>
+          </div>
+          <div className="space-y-5">
+            {record.propertyIntelligence.map((intelligence) => {
+              const property = propertyById.get(intelligence.propertyId);
+              return property ? (
+                <PropertyIntelligenceCard
+                  key={intelligence.propertyId}
+                  property={property}
+                  intelligence={intelligence}
+                />
+              ) : null;
+            })}
+          </div>
+        </section>
       )}
     </main>
   );

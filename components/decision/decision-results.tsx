@@ -1,21 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, ArrowRight, Check, Database, Save } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AlertTriangle, ArrowRight, Check, Database, LoaderCircle, RefreshCcw, Save, Sparkles } from "lucide-react";
 import { AIAnalysisPanel } from "@/components/ai/ai-analysis-panel";
 import { DecisionPropertyCard } from "@/components/decision/decision-property-card";
+import { PropertyIntelligenceCard } from "@/components/intelligence/property-intelligence-card";
 import { Button } from "@/components/ui/button";
 import { findAIAnalysisBySignature } from "@/lib/ai-analysis-storage";
 import { projectAIAnalysisContext } from "@/lib/ai/input";
+import { validatePropertyIntelligence } from "@/lib/ai/property-intelligence-validation";
 import { createAIInputSignature } from "@/lib/ai/signature";
 import { BUYER_PREFERENCES_STORAGE_KEY, loadBuyerPreferences } from "@/lib/buyer-preferences-storage";
+import { createDecisionPropertyView, validateTextField } from "@/lib/decision/dataQuality";
 import { runDecisionEngine } from "@/lib/decision/engine";
 import { saveDecisionHistory } from "@/lib/decision-history-storage";
 import { getProperties, PROPERTY_STORAGE_KEY } from "@/lib/property-storage";
 import type { BuyerPreferences } from "@/types/buyer-preferences";
 import type { DecisionEngineResult } from "@/types/decision";
 import type { Property } from "@/types/property";
+import type { PropertyIntelligence, PropertyIntelligenceRequest } from "@/types/property-intelligence";
 
 interface ResultsState {
   properties: Property[];
@@ -53,12 +57,60 @@ function getAIOverallSummary(
   return summaries.length > 0 ? summaries.join("\n") : null;
 }
 
+type IntelligenceState =
+  | { status: "loading" }
+  | { status: "success"; intelligence: PropertyIntelligence }
+  | { status: "error"; message: string };
+
+function createPropertyIntelligenceRequest(
+  property: Property,
+  preferences: BuyerPreferences,
+): PropertyIntelligenceRequest {
+  const safeProperty = createDecisionPropertyView(property);
+  const primaryWorkLocation = validateTextField(preferences.primaryWorkLocation).status === "valid"
+    ? preferences.primaryWorkLocation.trim()
+    : null;
+
+  return {
+    property: {
+      id: property.id,
+      name: property.name,
+      city: safeProperty.city,
+      district: safeProperty.district,
+      address: safeProperty.address,
+      totalPrice: property.totalPrice,
+      listingPrice: property.listingPrice ?? null,
+      area: property.area,
+      layout: safeProperty.layout,
+      floor: property.floor,
+      metroDistance: safeProperty.metroDistance,
+      schoolInformation: safeProperty.schoolInformation.trim() || null,
+      propertyManagementInformation: safeProperty.propertyManagementInformation.trim() || null,
+      deliveryYear: property.deliveryYear ?? null,
+      orientation: property.orientation ?? null,
+    },
+    preferences: {
+      purchasePurpose: preferences.purchasePurpose,
+      maximumBudget: preferences.maximumBudget,
+      commuteMode: preferences.commuteMode,
+      primaryWorkLocation,
+      educationNeed: preferences.educationNeed,
+      topPriorities: preferences.topPriorities,
+    },
+  };
+}
+
 export function DecisionResults() {
   const [state, setState] = useState<ResultsState>({ properties: [], preferences: null, engine: null, message: null });
   const [isLoading, setIsLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
+  const [intelligenceByProperty, setIntelligenceByProperty] = useState<Record<string, IntelligenceState>>({});
+  const intelligenceRequestsRef = useRef(new Map<string, AbortController>());
 
   const refresh = useCallback(() => {
+    intelligenceRequestsRef.current.forEach((controller) => controller.abort());
+    intelligenceRequestsRef.current.clear();
+    setIntelligenceByProperty({});
     setSaveStatus("idle");
     const manualProperties = getProperties().filter((property) => property.source === "manual");
     const preferencesResult = loadBuyerPreferences();
@@ -97,6 +149,58 @@ export function DecisionResults() {
     return () => window.removeEventListener("storage", handleStorage);
   }, [refresh]);
 
+  useEffect(() => () => {
+    intelligenceRequestsRef.current.forEach((controller) => controller.abort());
+  }, []);
+
+  async function generatePropertyIntelligence(property: Property): Promise<void> {
+    if (!state.preferences || intelligenceRequestsRef.current.has(property.id)) return;
+    const controller = new AbortController();
+    intelligenceRequestsRef.current.set(property.id, controller);
+    setIntelligenceByProperty((current) => ({ ...current, [property.id]: { status: "loading" } }));
+
+    try {
+      const response = await fetch("/api/intelligence/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(createPropertyIntelligenceRequest(property, state.preferences)),
+        signal: controller.signal,
+      });
+      const payload: unknown = await response.json();
+      if (controller.signal.aborted) return;
+      const validation = validatePropertyIntelligence(payload);
+      if (!response.ok || !validation.success || validation.data.propertyId !== property.id) {
+        setIntelligenceByProperty((current) => ({
+          ...current,
+          [property.id]: { status: "error", message: "房产智能分析暂时不可用，请稍后重试。" },
+        }));
+        return;
+      }
+      setIntelligenceByProperty((current) => ({
+        ...current,
+        [property.id]: { status: "success", intelligence: validation.data },
+      }));
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
+      setIntelligenceByProperty((current) => ({
+        ...current,
+        [property.id]: { status: "error", message: "无法连接房产智能分析服务。" },
+      }));
+    } finally {
+      if (intelligenceRequestsRef.current.get(property.id) === controller) {
+        intelligenceRequestsRef.current.delete(property.id);
+      }
+    }
+  }
+
+  function generateAllPropertyIntelligence(): void {
+    state.properties.forEach((property) => {
+      if (intelligenceByProperty[property.id]?.status !== "success") {
+        void generatePropertyIntelligence(property);
+      }
+    });
+  }
+
   function handleSaveDecision(): void {
     if (!state.engine || !state.preferences) return;
     const topResult = state.engine.results[0];
@@ -111,6 +215,9 @@ export function DecisionResults() {
         decisionResult: state.engine,
         recommendedPropertyId: topResult?.propertyId ?? null,
         aiOverallSummary: getAIOverallSummary(state.properties, state.preferences, state.engine),
+        propertyIntelligence: Object.values(intelligenceByProperty).flatMap((item) =>
+          item.status === "success" ? [item.intelligence] : []
+        ),
       });
       setSaveStatus("saved");
     } catch {
@@ -144,6 +251,12 @@ export function DecisionResults() {
   const optionalEvidence = winner.confidence.evidenceItems.filter((item) => item.category === "optional_confirmation");
   const completeness = winner.confidence.dataCompleteness;
   const hasInvalidInputs = state.engine.results.some((result) => result.confidence.invalidInputFields.length > 0);
+  const intelligenceStates = Object.values(intelligenceByProperty);
+  const isIntelligenceLoading = intelligenceStates.some((item) => item.status === "loading");
+  const hasIntelligence = intelligenceStates.some((item) => item.status === "success");
+  const hasCompleteIntelligence = state.properties.length > 0 && state.properties.every(
+    (property) => intelligenceByProperty[property.id]?.status === "success",
+  );
 
   return (
     <>
@@ -215,6 +328,49 @@ export function DecisionResults() {
           <Link href={`/results/${winner.propertyId}`} className="mt-6 inline-flex items-center gap-2 text-sm text-[#607158]">查看完整 15 维证据 <ArrowRight size={16} /></Link>
         </section>
       )}
+
+      <section className="mt-7">
+        <div className="card flex flex-col gap-5 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
+          <div>
+            <p className="text-xs uppercase tracking-[0.18em] text-[#75886d]">Property Intelligence</p>
+            <h2 className="mt-2 font-serif text-2xl">房产智能分析</h2>
+            <p className="mt-2 text-sm leading-6 text-[#70736e]">基于已提供房源信息和一般性地理知识，补充区域、产业、生活与资产价值背景。</p>
+          </div>
+          <Button type="button" onClick={generateAllPropertyIntelligence} disabled={isIntelligenceLoading || hasCompleteIntelligence} className="shrink-0">
+            {isIntelligenceLoading ? <LoaderCircle className="animate-spin" size={16} /> : hasIntelligence ? <RefreshCcw size={16} /> : <Sparkles size={16} />}
+            {isIntelligenceLoading
+              ? "正在分析房产价值..."
+              : hasCompleteIntelligence
+                ? "已生成房产智能分析"
+                : hasIntelligence
+                  ? "生成未完成分析"
+                  : "生成房产智能分析"}
+          </Button>
+        </div>
+
+        {intelligenceStates.length === 0 && (
+          <div className="mt-4 rounded-2xl border border-dashed border-[#dcded7] p-6 text-center text-sm text-[#7b7e78]">未生成房产智能分析</div>
+        )}
+
+        <div className="mt-4 space-y-5">
+          {state.properties.map((property) => {
+            const intelligenceState = intelligenceByProperty[property.id];
+            if (!intelligenceState) return null;
+            if (intelligenceState.status === "success") {
+              return <PropertyIntelligenceCard key={property.id} property={property} intelligence={intelligenceState.intelligence} />;
+            }
+            if (intelligenceState.status === "loading") {
+              return <div key={property.id} className="card flex min-h-36 items-center justify-center gap-3 p-6 text-sm text-[#65725f]"><LoaderCircle className="animate-spin" size={20} />正在分析 {property.name} 的房产价值...</div>;
+            }
+            return (
+              <div key={property.id} className="card flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-3 text-sm text-[#78684a]"><AlertTriangle className="mt-0.5 shrink-0" size={18} /><div><b>{property.name}</b><p className="mt-1">{intelligenceState.message}</p></div></div>
+                <Button type="button" onClick={() => void generatePropertyIntelligence(property)} className="shrink-0 bg-white text-[#53674d] ring-1 ring-[#d8d8d1] hover:bg-[#f3f3ee]"><RefreshCcw size={15} />重新尝试</Button>
+              </div>
+            );
+          })}
+        </div>
+      </section>
 
       <section className="mt-7 flex flex-col gap-4 rounded-2xl border border-[#e3e5de] bg-[#f7f9f5] p-5 sm:flex-row sm:items-center sm:justify-between">
         <div>

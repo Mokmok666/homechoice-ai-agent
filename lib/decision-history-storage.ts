@@ -5,6 +5,7 @@ import type {
   DecisionHistoryStorage,
 } from "@/types/decision-history";
 import type { Recommendation } from "@/types/decision";
+import { validatePropertyIntelligence } from "@/lib/ai/property-intelligence-validation";
 
 export const DECISION_HISTORY_STORAGE_KEY = "homechoice.decision-history.v1";
 
@@ -46,6 +47,16 @@ function isValidHistoryRecord(value: unknown): value is DecisionHistoryRecord {
     typeof property.layout === "string"
   );
   if (!propertiesAreValid) return false;
+
+  if (
+    value.propertyIntelligence !== undefined &&
+    (!Array.isArray(value.propertyIntelligence) ||
+      !value.propertyIntelligence.every(
+        (intelligence) => validatePropertyIntelligence(intelligence).success,
+      ))
+  ) {
+    return false;
+  }
 
   const engine = value.decisionResult;
   if (
