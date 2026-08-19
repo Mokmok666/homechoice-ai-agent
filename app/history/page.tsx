@@ -1,2 +1,11 @@
-import Link from "next/link"; import { CalendarDays,ChevronRight,Lightbulb,Star } from "lucide-react"; import { history,properties } from "@/lib/mock-data"; import { PropertyImage } from "@/components/property/property-image";
-export default function HistoryPage(){return <main className="page"><h1 className="display">历史记录</h1><p className="sub">你过去的房源对比与 AI 分析都会保存在这里，方便回看。</p><div className="desktop-grid mt-7 grid grid-cols-[1fr_320px] gap-10"><section className="space-y-4">{history.map((h,n)=><article className="card grid grid-cols-[130px_260px_1fr_260px] items-center gap-5 p-5" key={h.id}><div className="flex gap-4"><span className="grid size-12 place-items-center rounded-full bg-[#f1efeb]"><CalendarDays/></span><div><small className="sage">{h.date.slice(0,4)}</small><b className="block">{h.date.slice(5)}</b><small className="text-[#999]">{h.time}</small></div></div><div className="flex gap-2">{properties.slice(0,3).map(p=><div className="h-16 w-20 overflow-hidden rounded-lg" key={p.id}><PropertyImage src={p.image} alt={p.name}/></div>)}</div><div><h2 className="font-semibold">{h.title}</h2><p className="mt-2 text-sm text-[#777]">{h.count} 套房源 · 综合家庭需求对比</p></div><div><div className="rounded-xl bg-[#f5f5f1] p-3 text-sm"><span className="flex gap-2 text-xs sage"><Star size={14}/>最终推荐</span><b className="mt-1 block truncate">{h.recommendation}</b></div><div className="mt-3 flex justify-end gap-4 text-sm"><Link href="/results">查看详情 <ChevronRight className="inline" size={15}/></Link><Link href="/chat" className="sage">继续分析 <ChevronRight className="inline" size={15}/></Link></div></div></article>)}</section><aside className="card h-fit overflow-hidden"><div className="h-48 bg-[url('https://images.unsplash.com/photo-1494438639946-1ebd1d20bf85?auto=format&fit=crop&w=700&q=80')] bg-cover bg-center"/><div className="p-7"><h2 className="section-title flex gap-3"><Lightbulb className="sage"/>AI 建议</h2><p className="mt-5 leading-8 text-[#666]">定期回顾历史记录，可以帮助你看到偏好如何随时间变化，做出更符合需求的决策。</p></div></aside></div></main>}
+import { DecisionHistoryList } from "@/components/history/decision-history-list";
+
+export default function HistoryPage() {
+  return (
+    <main className="page">
+      <h1 className="display">决策记录</h1>
+      <p className="sub">保存重要的房源比较结果，随时回看当时的选择依据。</p>
+      <div className="mt-7"><DecisionHistoryList /></div>
+    </main>
+  );
+}

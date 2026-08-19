@@ -2,12 +2,16 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, ArrowRight, Database } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, Database, Save } from "lucide-react";
 import { AIAnalysisPanel } from "@/components/ai/ai-analysis-panel";
 import { DecisionPropertyCard } from "@/components/decision/decision-property-card";
 import { Button } from "@/components/ui/button";
+import { findAIAnalysisBySignature } from "@/lib/ai-analysis-storage";
+import { projectAIAnalysisContext } from "@/lib/ai/input";
+import { createAIInputSignature } from "@/lib/ai/signature";
 import { BUYER_PREFERENCES_STORAGE_KEY, loadBuyerPreferences } from "@/lib/buyer-preferences-storage";
 import { runDecisionEngine } from "@/lib/decision/engine";
+import { saveDecisionHistory } from "@/lib/decision-history-storage";
 import { getProperties, PROPERTY_STORAGE_KEY } from "@/lib/property-storage";
 import type { BuyerPreferences } from "@/types/buyer-preferences";
 import type { DecisionEngineResult } from "@/types/decision";
@@ -26,11 +30,36 @@ const RECOMMENDATION_LABELS = {
   PASS: "暂不推荐",
 } as const;
 
+function getAIOverallSummary(
+  properties: Property[],
+  preferences: BuyerPreferences,
+  engine: DecisionEngineResult,
+): string | null {
+  const propertyById = new Map(properties.map((property) => [property.id, property]));
+  const summaries = engine.results.flatMap((decisionResult) => {
+    const property = propertyById.get(decisionResult.propertyId);
+    if (!property) return [];
+    const context = projectAIAnalysisContext({
+      property,
+      preferences,
+      decisionResult,
+      decisionVersion: engine.engineVersion,
+      asOfDate: engine.asOfDate,
+    });
+    const inputSignature = createAIInputSignature(context);
+    const cached = findAIAnalysisBySignature(property.id, inputSignature, engine.engineVersion);
+    return cached ? [`${property.name}：${cached.analysis.summary}`] : [];
+  });
+  return summaries.length > 0 ? summaries.join("\n") : null;
+}
+
 export function DecisionResults() {
   const [state, setState] = useState<ResultsState>({ properties: [], preferences: null, engine: null, message: null });
   const [isLoading, setIsLoading] = useState(true);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
 
   const refresh = useCallback(() => {
+    setSaveStatus("idle");
     const manualProperties = getProperties().filter((property) => property.source === "manual");
     const preferencesResult = loadBuyerPreferences();
     if (preferencesResult.status !== "valid") {
@@ -67,6 +96,27 @@ export function DecisionResults() {
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
   }, [refresh]);
+
+  function handleSaveDecision(): void {
+    if (!state.engine || !state.preferences) return;
+    const topResult = state.engine.results[0];
+    const topProperty = state.properties.find((property) => property.id === topResult?.propertyId);
+    try {
+      saveDecisionHistory({
+        title: topProperty
+          ? `${topProperty.name} 等 ${state.properties.length} 套房源对比`
+          : `${state.properties.length} 套房源决策`,
+        properties: state.properties,
+        preferences: state.preferences,
+        decisionResult: state.engine,
+        recommendedPropertyId: topResult?.propertyId ?? null,
+        aiOverallSummary: getAIOverallSummary(state.properties, state.preferences, state.engine),
+      });
+      setSaveStatus("saved");
+    } catch {
+      setSaveStatus("error");
+    }
+  }
 
   if (isLoading) return <div className="card mt-8 h-64 animate-pulse" aria-label="正在计算分析结果" />;
 
@@ -165,6 +215,18 @@ export function DecisionResults() {
           <Link href={`/results/${winner.propertyId}`} className="mt-6 inline-flex items-center gap-2 text-sm text-[#607158]">查看完整 15 维证据 <ArrowRight size={16} /></Link>
         </section>
       )}
+
+      <section className="mt-7 flex flex-col gap-4 rounded-2xl border border-[#e3e5de] bg-[#f7f9f5] p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="font-semibold">保存当前决策快照</h2>
+          <p className="mt-1 text-xs leading-5 text-[#747772]">保存当前房源、购房偏好和分析结果，后续资料变化不会影响这份记录。</p>
+          {saveStatus === "error" && <p className="mt-2 text-xs text-[#9a5d50]">保存失败，请检查浏览器存储空间后重试。</p>}
+        </div>
+        <Button type="button" onClick={handleSaveDecision} disabled={saveStatus === "saved"} className="shrink-0">
+          {saveStatus === "saved" ? <Check size={16} /> : <Save size={16} />}
+          {saveStatus === "saved" ? "已保存" : "保存本次决策"}
+        </Button>
+      </section>
 
       {state.preferences && (
         <AIAnalysisPanel
