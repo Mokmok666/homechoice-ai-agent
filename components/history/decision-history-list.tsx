@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowRight, CalendarDays, Clock3, Home, Star } from "lucide-react";
-import { getDecisionHistory } from "@/lib/decision-history-storage";
+import { ArrowRight, CalendarDays, Clock3, Home, Star, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { deleteDecisionHistory, getDecisionHistory } from "@/lib/decision-history-storage";
 import type { DecisionHistoryRecord } from "@/types/decision-history";
 
 const RECOMMENDATION_LABELS = {
@@ -24,6 +25,7 @@ function formatSavedAt(value: string): string {
 
 export function DecisionHistoryList() {
   const [records, setRecords] = useState<DecisionHistoryRecord[] | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<DecisionHistoryRecord | null>(null);
 
   useEffect(() => setRecords(getDecisionHistory()), []);
 
@@ -34,8 +36,8 @@ export function DecisionHistoryList() {
       <section className="card grid min-h-80 place-items-center p-8 text-center">
         <div className="max-w-md">
           <span className="mx-auto grid size-16 place-items-center rounded-full bg-[#f1f3ed] text-[#687a61]"><Clock3 size={28} /></span>
-          <h2 className="mt-5 text-xl font-semibold">还没有保存的决策</h2>
-          <p className="mt-3 text-sm leading-7 text-[#777a74]">完成房源分析后，可在结果页保存当时的房源、偏好与决策结果。</p>
+          <h2 className="mt-5 text-xl font-semibold">还没有保存过决策</h2>
+          <p className="mt-3 text-sm leading-7 text-[#777a74]">完成一次房源分析后，这里会保存你的选择依据，方便之后回顾。</p>
           <Link href="/results" className="pill mx-auto mt-6 w-fit">前往分析结果 <ArrowRight size={16} /></Link>
         </div>
       </section>
@@ -43,8 +45,9 @@ export function DecisionHistoryList() {
   }
 
   return (
-    <section className="space-y-4">
-      {records.map((record) => {
+    <>
+      <section className="space-y-4">
+        {records.map((record) => {
         const topResult = record.decisionResult.results[0];
         const topProperty = record.properties.find((property) => property.id === record.recommendedPropertyId);
         return (
@@ -63,11 +66,32 @@ export function DecisionHistoryList() {
                 <b className="mt-1 block truncate">{topProperty?.name ?? "暂无明确首选"}</b>
                 {topResult && <p className="mt-1 text-xs text-[#858781]">{RECOMMENDATION_LABELS[topResult.recommendation]} · 匹配度 {topResult.overallScore ?? "—"}</p>}
               </div>
-              <Link href={`/history/${record.id}`} className="mt-3 flex items-center justify-end gap-2 text-sm text-[#617359]">查看历史快照 <ArrowRight size={15} /></Link>
+              <div className="mt-3 flex items-center justify-end gap-3">
+                <button type="button" onClick={() => setPendingDelete(record)} className="inline-flex items-center gap-1.5 text-xs text-[#9b5a50] transition hover:text-[#7f4038]" aria-label={`删除 ${record.title}`}><Trash2 size={14} />删除</button>
+                <Link href={`/history/${record.id}`} className="flex items-center gap-2 text-sm text-[#617359]">查看历史快照 <ArrowRight size={15} /></Link>
+              </div>
             </div>
           </article>
         );
-      })}
-    </section>
+        })}
+      </section>
+
+      {pendingDelete && (
+        <div className="fixed inset-0 z-[70] grid place-items-center bg-black/25 p-5 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="delete-history-title">
+          <div className="w-full max-w-sm rounded-2xl border border-black/[0.06] bg-[#fffefa] p-6 shadow-[0_24px_70px_rgba(45,42,35,0.2)]">
+            <span className="grid size-11 place-items-center rounded-full bg-[#f8eae7] text-[#984f45]"><Trash2 size={20} /></span>
+            <h2 id="delete-history-title" className="mt-4 text-xl font-semibold">删除该决策记录？</h2>
+            <p className="mt-2 text-sm leading-6 text-[#747772]">删除后将无法在本浏览器中恢复，但不会影响当前房源和购房偏好。</p>
+            <div className="mt-6 flex justify-end gap-3">
+              <Button type="button" onClick={() => setPendingDelete(null)} className="bg-white text-[#4f544d] ring-1 ring-[#ddddd6] hover:bg-[#f4f3ee]">取消</Button>
+              <Button type="button" onClick={() => {
+                setRecords(deleteDecisionHistory(pendingDelete.id));
+                setPendingDelete(null);
+              }} className="bg-[#9b5a50] text-white hover:bg-[#864a42]">删除</Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

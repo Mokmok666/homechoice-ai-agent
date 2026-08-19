@@ -10,7 +10,7 @@ import type { Property, PropertyStatus } from "@/types/property";
 
 const STATUS_LABELS: Record<PropertyStatus, string> = {
   draft: "Draft",
-  pending_analysis: "Waiting for AI Analysis",
+  pending_analysis: "待生成分析",
   analyzing: "Analyzing",
   completed: "Analysis Completed",
   failed: "Analysis Failed",

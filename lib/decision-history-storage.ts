@@ -122,3 +122,15 @@ export function saveDecisionHistory(input: DecisionHistoryInput): DecisionHistor
   window.localStorage.setItem(DECISION_HISTORY_STORAGE_KEY, JSON.stringify(envelope));
   return cloneSnapshot(record);
 }
+
+export function deleteDecisionHistory(id: string): DecisionHistoryRecord[] {
+  if (typeof window === "undefined") return [];
+
+  const records = getDecisionHistory().filter((record) => record.id !== id);
+  const envelope: DecisionHistoryStorage = {
+    schemaVersion: DECISION_HISTORY_SCHEMA_VERSION,
+    records,
+  };
+  window.localStorage.setItem(DECISION_HISTORY_STORAGE_KEY, JSON.stringify(envelope));
+  return records;
+}
