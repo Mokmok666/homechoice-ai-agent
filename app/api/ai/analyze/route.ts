@@ -74,6 +74,8 @@ export async function POST(request: Request): Promise<NextResponse<AIAnalysisRes
       candidate,
       requestValidation.data.context.authoritativeTopPropertyId,
       requestValidation.data.context.candidates[0]?.property.name ?? undefined,
+      requestValidation.data.context.candidates.slice(1).flatMap((candidate) => candidate.property.name ? [candidate.property.name] : []),
+      requiresCommuteBoundaryNuance(requestValidation.data),
     );
     if (!responseValidation.success || !responseValidation.data.ok) {
       return errorResponse("INVALID_AI_OUTPUT", "AI 返回内容未通过安全校验。", false);
@@ -86,4 +88,16 @@ export async function POST(request: Request): Promise<NextResponse<AIAnalysisRes
     }
     return errorResponse("AI_PROVIDER_ERROR", "AI 分析服务发生未知错误。", true);
   }
+}
+
+function requiresCommuteBoundaryNuance(request: import("@/types/ai-analysis").AIAnalysisRequest): boolean {
+  const commute = request.context.candidates[0]?.geoEvidence?.commute;
+  return [commute?.primary, commute?.partner].some((person) => Boolean(
+    person
+    && person.selectedMinutes !== null
+    && person.idealCommuteMinutes !== null
+    && person.maxCommuteMinutes !== null
+    && person.selectedMinutes > person.idealCommuteMinutes
+    && person.selectedMinutes <= person.maxCommuteMinutes,
+  ));
 }

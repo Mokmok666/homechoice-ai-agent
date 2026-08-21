@@ -24,6 +24,8 @@ async function performAIAnalysisRequest(
       payload,
       request.context.authoritativeTopPropertyId,
       request.context.candidates[0]?.property.name ?? undefined,
+      request.context.candidates.slice(1).flatMap((candidate) => candidate.property.name ? [candidate.property.name] : []),
+      requiresCommuteBoundaryNuance(request),
     );
     if (!validation.success) {
       return {
@@ -57,6 +59,11 @@ async function performAIAnalysisRequest(
       },
     };
   }
+}
+
+function requiresCommuteBoundaryNuance(request: AIAnalysisRequest): boolean {
+  const commute = request.context.candidates[0]?.geoEvidence?.commute;
+  return [commute?.primary, commute?.partner].some((person) => Boolean(person && person.selectedMinutes !== null && person.idealCommuteMinutes !== null && person.maxCommuteMinutes !== null && person.selectedMinutes > person.idealCommuteMinutes && person.selectedMinutes <= person.maxCommuteMinutes));
 }
 
 export function requestAIAnalysis(

@@ -107,6 +107,8 @@ function validateAnalysis(
   errors: string[],
   expectedTopPropertyId?: string,
   expectedTopPropertyName?: string,
+  expectedAlternativeNames: string[] = [],
+  requiresCommuteBoundaryNuance = false,
 ): void {
   if (!isRecord(analysis)) { errors.push("analysis must be an object"); return; }
   if (!hasOnlyKeys(analysis, ["topPropertyId", "topPropertyName", "decisionSummary", "pendingEvidence", "disclaimer"])) errors.push("analysis contains unexpected fields");
@@ -116,9 +118,13 @@ function validateAnalysis(
   if (!isNonEmptyString(analysis.decisionSummary) || /[\r\n]/.test(analysis.decisionSummary)) {
     errors.push("analysis.decisionSummary must be one paragraph");
   } else {
-    const sentenceCount = (analysis.decisionSummary.match(/[。！？]/g) ?? []).length;
-    if (sentenceCount < 4 || sentenceCount > 6) errors.push("analysis.decisionSummary must contain approximately 4-5 sentences");
-    if (INTERNAL_PRODUCT_LANGUAGE.test(analysis.decisionSummary)) errors.push("analysis.decisionSummary contains internal product language");
+    const decisionSummary = analysis.decisionSummary;
+    const sentenceCount = (decisionSummary.match(/[。！？]/g) ?? []).length;
+    if (sentenceCount < 3 || sentenceCount > 7) errors.push("analysis.decisionSummary sentence structure is unreasonable");
+    if (decisionSummary.length < 80 || decisionSummary.length > 650) errors.push("analysis.decisionSummary length is unreasonable");
+    if (INTERNAL_PRODUCT_LANGUAGE.test(decisionSummary)) errors.push("analysis.decisionSummary contains internal product language");
+    if (expectedAlternativeNames.length > 0 && !expectedAlternativeNames.some((name) => decisionSummary.includes(name))) errors.push("analysis.decisionSummary must compare an authoritative alternative");
+    if (requiresCommuteBoundaryNuance && /均.{0,8}(?:理想时间|理想通勤|理想范围)|(?:都|均)在.{0,6}理想/.test(decisionSummary)) errors.push("analysis.decisionSummary misstates commute threshold");
   }
   if (!isStringArray(analysis.pendingEvidence) || analysis.pendingEvidence.length > 3 || analysis.pendingEvidence.some((item) => INTERNAL_PRODUCT_LANGUAGE.test(item) || INTERNAL_PENDING_LANGUAGE.test(item)) || !isNonEmptyString(analysis.disclaimer)) errors.push("analysis evidence or disclaimer is invalid");
 }
@@ -127,11 +133,13 @@ export function validateAIAnalysisResponse(
   value: unknown,
   expectedTopPropertyId?: string,
   expectedTopPropertyName?: string,
+  expectedAlternativeNames: string[] = [],
+  requiresCommuteBoundaryNuance = false,
 ): ValidationResult<AIAnalysisResponse> {
   const errors: string[] = [];
   if (!isRecord(value) || typeof value.ok !== "boolean") return { success: false, errors: ["response must contain boolean ok"] };
   if (value.ok) {
-    validateAnalysis(value.analysis, errors, expectedTopPropertyId, expectedTopPropertyName);
+    validateAnalysis(value.analysis, errors, expectedTopPropertyId, expectedTopPropertyName, expectedAlternativeNames, requiresCommuteBoundaryNuance);
     const metadata = value.metadata;
     if (!isRecord(metadata) || !isNonEmptyString(metadata.generatedAt) || !isNonEmptyString(metadata.inputSignature) || metadata.provider !== "zhipu" || !isNonEmptyString(metadata.model)) errors.push("response metadata is invalid");
   } else {
