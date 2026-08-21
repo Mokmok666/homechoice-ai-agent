@@ -42,6 +42,20 @@ export interface ComparableTransaction {
   confirmed: boolean;
 }
 
+export interface ConfirmedPropertyLocation {
+  poiId?: string;
+  name: string;
+  formattedAddress: string;
+  province?: string;
+  city: string;
+  district: string;
+  lng: number;
+  lat: number;
+  source: "amap";
+  confirmedByUser: boolean;
+  confirmedAt: string;
+}
+
 export interface Property {
   id: string;
   name: string;
@@ -67,6 +81,7 @@ export interface Property {
   deliveryYear?: number | null;
   orientation?: Orientation | null;
   customOrientation?: string | null;
+  confirmedLocation?: ConfirmedPropertyLocation | null;
   status: PropertyStatus;
   imageUrl?: string;
   source: "mock" | "manual";
@@ -99,4 +114,5 @@ export type PropertyInput = Pick<
   | "deliveryYear"
   | "orientation"
   | "customOrientation"
+  | "confirmedLocation"
 >;

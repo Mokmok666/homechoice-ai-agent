@@ -5,6 +5,7 @@ import {
   PROPERTY_STATUSES,
   type Property,
   type ComparableTransaction,
+  type ConfirmedPropertyLocation,
   type FloorLevel,
   type Orientation,
   type PropertyInput,
@@ -71,6 +72,38 @@ function isComparableTransaction(value: unknown): value is ComparableTransaction
     typeof item.source === "string" &&
     typeof item.confirmed === "boolean"
   );
+}
+
+function normalizeConfirmedLocation(value: unknown): ConfirmedPropertyLocation | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const location = value as Partial<ConfirmedPropertyLocation>;
+  const validCoordinates = typeof location.lng === "number" && Number.isFinite(location.lng) &&
+    location.lng >= -180 && location.lng <= 180 &&
+    typeof location.lat === "number" && Number.isFinite(location.lat) &&
+    location.lat >= -90 && location.lat <= 90;
+  if (
+    typeof location.name !== "string" || !location.name.trim() ||
+    typeof location.formattedAddress !== "string" || !location.formattedAddress.trim() ||
+    typeof location.city !== "string" || !location.city.trim() ||
+    typeof location.district !== "string" || !location.district.trim() ||
+    location.source !== "amap" || location.confirmedByUser !== true ||
+    typeof location.confirmedAt !== "string" || !Number.isFinite(Date.parse(location.confirmedAt)) ||
+    !validCoordinates
+  ) return null;
+
+  return {
+    ...(typeof location.poiId === "string" && location.poiId.trim() ? { poiId: location.poiId.trim() } : {}),
+    name: location.name.trim(),
+    formattedAddress: location.formattedAddress.trim(),
+    ...(typeof location.province === "string" && location.province.trim() ? { province: location.province.trim() } : {}),
+    city: location.city.trim(),
+    district: location.district.trim(),
+    lng: location.lng!,
+    lat: location.lat!,
+    source: "amap",
+    confirmedByUser: true,
+    confirmedAt: location.confirmedAt,
+  };
 }
 
 function normalizeProperty(value: unknown): Property | null {
@@ -148,6 +181,7 @@ function normalizeProperty(value: unknown): Property | null {
   normalized.comparableTransactions = Array.isArray(property.comparableTransactions)
     ? property.comparableTransactions.filter(isComparableTransaction)
     : [];
+  normalized.confirmedLocation = normalizeConfirmedLocation(property.confirmedLocation);
   return normalized;
 }
 
@@ -228,6 +262,9 @@ export function createProperty(input: PropertyInput): Property {
   const timestamp = new Date().toISOString();
   const property: Property = {
     ...input,
+    name: input.confirmedLocation?.confirmedByUser
+      ? input.confirmedLocation.name
+      : input.name,
     id: createId(),
     status: "pending_analysis",
     source: "manual",
@@ -247,6 +284,9 @@ export function updateProperty(id: string, input: PropertyInput): Property {
   const updated: Property = {
     ...existing,
     ...input,
+    name: input.confirmedLocation?.confirmedByUser
+      ? input.confirmedLocation.name
+      : input.name,
     status: "pending_analysis",
     updatedAt: new Date().toISOString(),
   };

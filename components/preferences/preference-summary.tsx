@@ -1,6 +1,7 @@
 import { BriefcaseBusiness, GraduationCap, ListChecks, WalletCards } from "lucide-react";
 import type {
   CommuteMode,
+  SelectableCommuteMode,
   DecisionPriority,
   EducationNeed,
   EducationStage,
@@ -16,6 +17,9 @@ export const PURCHASE_PURPOSE_LABELS: Record<PurchasePurpose, string> = {
 export const COMMUTE_MODE_LABELS: Record<CommuteMode, string> = {
   driving: "驾车",
   public_transit: "公共交通",
+  walking: "步行",
+  cycling: "骑行",
+  flexible: "灵活选择",
   both: "驾车或公共交通",
   not_important: "通勤不重要",
 };
@@ -51,9 +55,12 @@ interface PreferenceSummaryProps {
   maximumBudget: string;
   primaryWorkLocation: string;
   partnerWorkLocation: string;
-  commuteMode: CommuteMode | "";
-  idealCommuteMinutes: string;
-  maxCommuteMinutes: string;
+  primaryCommuteMode: SelectableCommuteMode | "";
+  primaryIdealCommuteMinutes: string;
+  primaryMaxCommuteMinutes: string;
+  partnerCommuteMode: SelectableCommuteMode | "";
+  partnerIdealCommuteMinutes: string;
+  partnerMaxCommuteMinutes: string;
   educationNeed: EducationNeed | "";
   educationStages: EducationStage[];
   topPriorities: DecisionPriority[];
@@ -72,10 +79,10 @@ function SummaryItem({ icon, label, children }: { icon: React.ReactNode; label: 
 }
 
 export function PreferenceSummary(props: PreferenceSummaryProps) {
-  const commuteText = props.commuteMode
-    ? props.commuteMode === "not_important"
+  const commuteText = props.primaryCommuteMode
+    ? props.primaryCommuteMode === "not_important"
       ? COMMUTE_MODE_LABELS.not_important
-      : `${COMMUTE_MODE_LABELS[props.commuteMode]} · ${props.primaryWorkLocation.trim() || "待填写地点"}${props.partnerWorkLocation.trim() ? ` / 伴侣：${props.partnerWorkLocation.trim()}` : ""}${props.idealCommuteMinutes ? ` · 理想 ${props.idealCommuteMinutes} 分钟` : ""}${props.maxCommuteMinutes ? ` · 最长 ${props.maxCommuteMinutes} 分钟` : ""}`
+      : `${COMMUTE_MODE_LABELS[props.primaryCommuteMode]} · ${props.primaryWorkLocation.trim() || "待填写地点"}${props.primaryIdealCommuteMinutes ? ` · 理想 ${props.primaryIdealCommuteMinutes} 分钟` : ""}${props.primaryMaxCommuteMinutes ? ` · 最长 ${props.primaryMaxCommuteMinutes} 分钟` : ""}${props.partnerWorkLocation.trim() ? ` / 伴侣：${props.partnerWorkLocation.trim()} · ${props.partnerCommuteMode ? COMMUTE_MODE_LABELS[props.partnerCommuteMode] : "待选方式"}${props.partnerIdealCommuteMinutes ? ` · 理想 ${props.partnerIdealCommuteMinutes} 分钟` : ""}${props.partnerMaxCommuteMinutes ? ` · 最长 ${props.partnerMaxCommuteMinutes} 分钟` : ""}` : ""}`
     : "待选择通勤方式";
 
   const educationText = props.educationNeed

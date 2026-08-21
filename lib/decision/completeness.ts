@@ -1,6 +1,7 @@
 import type { BuyerPreferences } from "../../types/buyer-preferences";
 import type { DataCompletenessResult } from "../../types/decision";
 import type { Property } from "../../types/property";
+import type { PropertyGeoEvidence } from "../../types/geo-evidence";
 import { validateMetroDistance, validateTextField } from "./dataQuality";
 
 interface WeightedField {
@@ -30,6 +31,7 @@ export function calculateDataCompleteness(
   property: Property,
   preferences: BuyerPreferences,
   asOfDate: string,
+  geoEvidence?: PropertyGeoEvidence,
 ): DataCompletenessResult {
   const basicFields: WeightedField[] = [
     { label: "房源名称", weight: 5, completed: hasValidText(property.name) },
@@ -43,7 +45,15 @@ export function calculateDataCompleteness(
   ];
 
   const livingFields: WeightedField[] = [
-    { label: "最近地铁距离", weight: 5, completed: validateMetroDistance(property.metroDistance).status === "valid" },
+    {
+      label: "最近地铁距离",
+      weight: 5,
+      completed: validateMetroDistance(property.metroDistance).status === "valid" || (
+        geoEvidence?.public_transport?.status !== "insufficient" &&
+        geoEvidence?.public_transport?.quality !== "low" &&
+        Number.isFinite(geoEvidence?.public_transport?.nearestDistanceMeters)
+      ),
+    },
     { label: "物业管理信息", weight: 5, completed: hasValidText(property.propertyManagementInformation) },
     { label: "交付年份", weight: 2, completed: property.deliveryYear !== null && property.deliveryYear !== undefined && Number.isInteger(property.deliveryYear) },
     { label: "朝向", weight: 1, completed: hasValidText(property.orientation) },

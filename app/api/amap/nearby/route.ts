@@ -59,17 +59,35 @@ export async function POST(
     return errorResponse("INVALID_ADDRESS", "请求内容必须是有效的 JSON。");
   }
 
-  if (
-    typeof body !== "object" ||
-    body === null ||
-    Array.isArray(body) ||
-    typeof (body as Record<string, unknown>).address !== "string"
-  ) {
-    return errorResponse("INVALID_ADDRESS", "address 必须是字符串。");
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return errorResponse("INVALID_ADDRESS", "请求结构无效。");
   }
+  const candidate = body as Record<string, unknown>;
+  const confirmed = candidate.confirmedLocation;
+  const isConfirmed = typeof confirmed === "object" && confirmed !== null && !Array.isArray(confirmed);
 
   try {
-    const geocoding = await geocodeAddress((body as { address: string }).address);
+    let geocoding: GeocodingResult;
+    if (isConfirmed) {
+      const location = confirmed as Record<string, unknown>;
+      if (
+        location.source !== "amap" || location.confirmedByUser !== true ||
+        typeof location.formattedAddress !== "string" || !location.formattedAddress.trim() ||
+        typeof location.lng !== "number" || !Number.isFinite(location.lng) || location.lng < -180 || location.lng > 180 ||
+        typeof location.lat !== "number" || !Number.isFinite(location.lat) || location.lat < -90 || location.lat > 90
+      ) return errorResponse("INVALID_COORDINATES", "已确认位置的坐标无效。");
+      geocoding = {
+        formattedAddress: location.formattedAddress.trim(),
+        province: typeof location.province === "string" ? location.province : undefined,
+        city: typeof location.city === "string" ? location.city : undefined,
+        district: typeof location.district === "string" ? location.district : undefined,
+        location: { lng: location.lng, lat: location.lat },
+      };
+    } else if (typeof candidate.address === "string") {
+      geocoding = await geocodeAddress(candidate.address);
+    } else {
+      return errorResponse("INVALID_ADDRESS", "请提供 address 或已确认的位置。");
+    }
     const nearby = await getNearbyPoiEvidence(geocoding.location);
     return NextResponse.json({ ok: true, geocoding, nearby });
   } catch (error) {

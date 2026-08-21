@@ -1,6 +1,7 @@
 import type { BuyerPreferences } from "../../types/buyer-preferences";
 import type { ConfidenceResult, DimensionEvaluation, EvidenceItem } from "../../types/decision";
 import type { Property } from "../../types/property";
+import type { PropertyGeoEvidence } from "../../types/geo-evidence";
 import { calculateDataCompleteness } from "./completeness";
 import { DIMENSION_TYPES } from "./dimensions";
 
@@ -17,9 +18,10 @@ export function calculateConfidence(
   preferences: BuyerPreferences,
   asOfDate: string,
   invalidInputFields: string[],
+  geoEvidence?: PropertyGeoEvidence,
 ): ConfidenceResult {
   const currentPhaseDimensions = dimensions.filter(
-    (dimension) => DIMENSION_TYPES[dimension.key] !== "ai",
+    (dimension) => DIMENSION_TYPES[dimension.key] !== "ai" || dimension.evidence.some((item) => item.source === "amap"),
   );
   const eligibleWeight = currentPhaseDimensions.reduce((sum, dimension) => sum + dimension.finalWeight, 0);
   const coveredWeight = currentPhaseDimensions.reduce(
@@ -37,13 +39,15 @@ export function calculateConfidence(
   const aiPendingInputs = unique(evidenceItems.filter((item) => item.category === "ai_inferred").map((item) => item.title));
   const improvementInputs = unique(evidenceItems.filter((item) => item.category === "optional_confirmation").map((item) => item.title));
   const aiDimensions = dimensions.filter((dimension) => DIMENSION_TYPES[dimension.key] === "ai");
-  const completedAIDimensions = aiDimensions.filter((dimension) => dimension.status !== "unknown").length;
+  const completedAIDimensions = aiDimensions.filter(
+    (dimension) => dimension.status !== "unknown" && dimension.evidence.some((item) => item.source !== "amap"),
+  ).length;
   const aiAnalysisProgress = {
     completed: completedAIDimensions,
     total: aiDimensions.length,
     percent: aiDimensions.length === 0 ? 100 : Math.round((completedAIDimensions / aiDimensions.length) * 100),
   };
-  const dataCompleteness = calculateDataCompleteness(property, preferences, asOfDate);
+  const dataCompleteness = calculateDataCompleteness(property, preferences, asOfDate, geoEvidence);
 
   return {
     dataCompletenessPercent: dataCompleteness.percent,

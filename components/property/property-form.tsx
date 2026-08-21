@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
-import { ArrowLeft, Building2, MapPin, Plus, School, TrainFront, Trash2 } from "lucide-react";
+import { ArrowLeft, Building2, Plus, School, TrainFront, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -15,13 +15,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { LocationConfirmation } from "@/components/property/location-confirmation";
 import { createProperty, getProperty, updateProperty } from "@/lib/property-storage";
-import type { ComparableTransaction, FloorLevel, Orientation, PropertyInput } from "@/types/property";
-
-const CITY_DISTRICTS: Record<string, string[]> = {
-  "广州": ["天河区", "海珠区", "黄埔区", "番禺区", "荔湾区", "越秀区", "白云区", "南沙区"],
-  "佛山": ["禅城区", "南海区", "顺德区", "三水区", "高明区"],
-};
+import type { ComparableTransaction, ConfirmedPropertyLocation, FloorLevel, Orientation, PropertyInput } from "@/types/property";
 
 const LAYOUT_OPTIONS = [
   "1室1厅1卫",
@@ -142,10 +138,9 @@ function parseLayoutCounts(layout: string): { rooms: number; livingRooms: number
 function validateForm(form: PropertyFormState): FormErrors {
   const errors: FormErrors = {};
   const requiredFields: Array<[PropertyTextField, string]> = [
-    ["name", "请输入房源名称。"],
     ["city", "请选择城市。"],
     ["district", "请选择行政区。"],
-    ["address", "请输入详细地址。"],
+    ["address", "请输入房源或小区名称。"],
     ["layout", "请选择户型。"],
     ["floorLevel", "请选择所在楼层。"],
   ];
@@ -214,6 +209,7 @@ export function PropertyForm() {
   const [errors, setErrors] = useState<FormErrors>({});
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [confirmedLocation, setConfirmedLocation] = useState<ConfirmedPropertyLocation | null>(null);
 
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("id");
@@ -224,11 +220,12 @@ export function PropertyForm() {
       return;
     }
     setEditingId(id);
+    setConfirmedLocation(property.confirmedLocation ?? null);
     setForm({
       name: property.name,
       city: property.city,
       district: property.district,
-      address: property.address,
+      address: property.confirmedLocation?.name ?? property.address,
       totalPrice: String(property.totalPrice),
       area: String(property.area),
       layout: getLayoutSelection(property.layout, property.customLayout),
@@ -267,7 +264,17 @@ export function PropertyForm() {
 
   function handleCityChange(city: string) {
     setForm((current) => ({ ...current, city, district: "" }));
+    handleLocationConfirmation(null);
     setErrors((current) => ({ ...current, city: undefined, district: undefined, form: undefined }));
+  }
+
+  function handleLocationConfirmation(location: ConfirmedPropertyLocation | null) {
+    setConfirmedLocation(location);
+    if (location) {
+      setForm((current) => ({ ...current, name: location.name }));
+    } else if (!editingId) {
+      setForm((current) => ({ ...current, name: "" }));
+    }
   }
 
   function updateComparable(id: string, field: keyof Omit<ComparableFormRow, "id">, value: string | boolean) {
@@ -299,11 +306,12 @@ export function PropertyForm() {
           : "";
     const selectedLayout = form.layout === "其他" ? form.customLayout.trim() || "其他" : form.layout;
     const layoutCounts = parseLayoutCounts(selectedLayout);
+    const resolvedName = confirmedLocation?.name ?? (form.name.trim() || form.address.trim());
     const input: PropertyInput = {
-      name: form.name.trim(),
+      name: resolvedName,
       city: form.city.trim(),
       district: form.district.trim(),
-      address: form.address.trim(),
+      address: confirmedLocation?.formattedAddress ?? form.address.trim(),
       totalPrice: Number(form.totalPrice),
       area: Number(form.area),
       layout: selectedLayout,
@@ -330,6 +338,7 @@ export function PropertyForm() {
         source: item.source.trim(),
         confirmed: item.confirmed,
       })),
+      confirmedLocation,
     };
 
     setIsSubmitting(true);
@@ -343,9 +352,6 @@ export function PropertyForm() {
     }
   }
 
-  const districtOptions = CITY_DISTRICTS[form.city] ?? (form.district ? [form.district] : []);
-  const isLegacyCity = Boolean(form.city && !CITY_DISTRICTS[form.city]);
-
   return (
     <form onSubmit={handleSubmit} noValidate className="mt-7 space-y-6">
       {errors.form && <div className="rounded-xl border border-[#e5c9c3] bg-[#fff7f5] px-5 py-4 text-sm text-[#934b40]" role="alert">{errors.form}</div>}
@@ -358,38 +364,17 @@ export function PropertyForm() {
           </div>
         </CardHeader>
         <CardContent className="grid gap-6 px-6 py-7 sm:px-8 lg:grid-cols-2">
-          <div className="lg:col-span-2">
-            <Label htmlFor="name">房源名称 *</Label>
-            <Input id="name" className="mt-2" value={form.name} onChange={(e) => updateField("name", e.target.value)} placeholder="例如：珠江新城 · 保利天悦" {...inputErrorProps("name")} />
-            <FieldError id="name-error" message={errors.name} />
-          </div>
-          <div>
-            <Label htmlFor="city">城市 *</Label>
-            <select id="city" className={SELECT_CLASS} value={form.city} onChange={(event) => handleCityChange(event.target.value)} {...inputErrorProps("city")}>
-              <option value="">请选择城市</option>
-              <option value="广州">广州</option>
-              <option value="佛山">佛山</option>
-              {isLegacyCity && <option value={form.city}>{form.city}（原记录）</option>}
-            </select>
-            <FieldError id="city-error" message={errors.city} />
-          </div>
-          <div>
-            <Label htmlFor="district">行政区 *</Label>
-            <select id="district" className={SELECT_CLASS} value={form.district} disabled={!form.city} onChange={(event) => updateField("district", event.target.value)} {...inputErrorProps("district")}>
-              <option value="">{form.city ? "请选择行政区" : "请先选择城市"}</option>
-              {districtOptions.map((district) => <option key={district} value={district}>{district}</option>)}
-            </select>
-            <FieldError id="district-error" message={errors.district} />
-          </div>
-          <div className="lg:col-span-2">
-            <Label htmlFor="address">详细地址 *</Label>
-            <div className="relative mt-2">
-              <MapPin size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#8a8d87]" />
-              <Input id="address" className="pl-11" value={form.address} onChange={(e) => updateField("address", e.target.value)} placeholder="请输入街道、道路或楼栋信息" {...inputErrorProps("address")} />
-            </div>
-            <FieldError id="address-error" message={errors.address} />
-            <p className="mt-2 text-xs leading-5 text-[#777a74]">详细地址将在后续阶段支持地图搜索与位置确认。</p>
-          </div>
+          <LocationConfirmation
+            city={form.city}
+            district={form.district}
+            keyword={form.address}
+            confirmedLocation={confirmedLocation}
+            errors={{ city: errors.city, district: errors.district, address: errors.address }}
+            onCityChange={handleCityChange}
+            onDistrictChange={(district) => updateField("district", district)}
+            onKeywordChange={(keyword) => updateField("address", keyword)}
+            onConfirm={handleLocationConfirmation}
+          />
         </CardContent>
       </Card>
 

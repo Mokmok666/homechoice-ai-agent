@@ -4,8 +4,10 @@ import {
   EDUCATION_NEEDS,
   EDUCATION_STAGES,
   PURCHASE_PURPOSES,
+  SELECTABLE_COMMUTE_MODES,
   type BuyerPreferences,
   type BuyerPreferencesInput,
+  type ConfirmedWorkLocation,
 } from "@/types/buyer-preferences";
 
 export const BUYER_PREFERENCES_STORAGE_KEY = "homechoice.buyer-preferences.v1";
@@ -35,6 +37,37 @@ function isNullableFiniteNumber(value: unknown): value is number | null {
   return value === null || (typeof value === "number" && Number.isFinite(value));
 }
 
+function isOptionalNullableFiniteNumber(value: unknown): boolean {
+  return value === undefined || isNullableFiniteNumber(value);
+}
+
+function isConfirmedWorkLocation(value: unknown): value is ConfirmedWorkLocation {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.name === "string" && Boolean(item.name.trim()) &&
+    typeof item.formattedAddress === "string" && Boolean(item.formattedAddress.trim()) &&
+    (item.poiId === undefined || typeof item.poiId === "string") &&
+    (item.province === undefined || typeof item.province === "string") &&
+    (item.city === undefined || typeof item.city === "string") &&
+    (item.district === undefined || typeof item.district === "string") &&
+    typeof item.lng === "number" && Number.isFinite(item.lng) && item.lng >= -180 && item.lng <= 180 &&
+    typeof item.lat === "number" && Number.isFinite(item.lat) && item.lat >= -90 && item.lat <= 90 &&
+    item.source === "amap" && item.confirmedByUser === true &&
+    typeof item.confirmedAt === "string" && Number.isFinite(Date.parse(item.confirmedAt));
+}
+
+function sanitizeOptionalLocations(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const sanitized = { ...(value as Record<string, unknown>) };
+  if (!(sanitized.primaryWorkLocationConfirmed === undefined || sanitized.primaryWorkLocationConfirmed === null || isConfirmedWorkLocation(sanitized.primaryWorkLocationConfirmed))) {
+    delete sanitized.primaryWorkLocationConfirmed;
+  }
+  if (!(sanitized.partnerWorkLocationConfirmed === undefined || sanitized.partnerWorkLocationConfirmed === null || isConfirmedWorkLocation(sanitized.partnerWorkLocationConfirmed))) {
+    delete sanitized.partnerWorkLocationConfirmed;
+  }
+  return sanitized;
+}
+
 function isBuyerPreferences(value: unknown): value is BuyerPreferences {
   if (!value || typeof value !== "object") return false;
   const item = value as Partial<BuyerPreferences>;
@@ -48,9 +81,17 @@ function isBuyerPreferences(value: unknown): value is BuyerPreferences {
     item.maximumBudget <= 0 ||
     typeof item.primaryWorkLocation !== "string" ||
     !(typeof item.partnerWorkLocation === "string" || item.partnerWorkLocation === null) ||
+    !(item.primaryWorkLocationConfirmed === undefined || item.primaryWorkLocationConfirmed === null || isConfirmedWorkLocation(item.primaryWorkLocationConfirmed)) ||
+    !(item.partnerWorkLocationConfirmed === undefined || item.partnerWorkLocationConfirmed === null || isConfirmedWorkLocation(item.partnerWorkLocationConfirmed)) ||
     !isOneOf(item.commuteMode, COMMUTE_MODES) ||
     !isNullableFiniteNumber(item.idealCommuteMinutes) ||
     !isNullableFiniteNumber(item.maxCommuteMinutes) ||
+    !(item.primaryCommuteMode === undefined || isOneOf(item.primaryCommuteMode, SELECTABLE_COMMUTE_MODES)) ||
+    !isOptionalNullableFiniteNumber(item.primaryIdealCommuteMinutes) ||
+    !isOptionalNullableFiniteNumber(item.primaryMaxCommuteMinutes) ||
+    !(item.partnerCommuteMode === undefined || item.partnerCommuteMode === null || isOneOf(item.partnerCommuteMode, SELECTABLE_COMMUTE_MODES)) ||
+    !isOptionalNullableFiniteNumber(item.partnerIdealCommuteMinutes) ||
+    !isOptionalNullableFiniteNumber(item.partnerMaxCommuteMinutes) ||
     !isOneOf(item.educationNeed, EDUCATION_NEEDS) ||
     !Array.isArray(item.educationStages) ||
     !item.educationStages.every((stage) => isOneOf(stage, EDUCATION_STAGES)) ||
@@ -64,16 +105,29 @@ function isBuyerPreferences(value: unknown): value is BuyerPreferences {
     return false;
   }
 
-  if (item.commuteMode === "not_important") {
-    if (item.idealCommuteMinutes !== null || item.maxCommuteMinutes !== null) return false;
+
+  const primaryMode = item.primaryCommuteMode ?? (item.commuteMode === "both" ? "flexible" : item.commuteMode);
+  const primaryIdeal = item.primaryIdealCommuteMinutes ?? item.idealCommuteMinutes;
+  const primaryMaximum = item.primaryMaxCommuteMinutes ?? item.maxCommuteMinutes;
+
+  if (primaryMode === "not_important") {
+    if (primaryIdeal !== null || primaryMaximum !== null) return false;
   } else if (
     !item.primaryWorkLocation.trim() ||
-    item.idealCommuteMinutes === null ||
-    item.maxCommuteMinutes === null ||
-    item.idealCommuteMinutes < 0 ||
-    item.maxCommuteMinutes < item.idealCommuteMinutes
+    primaryIdeal === null ||
+    primaryMaximum === null ||
+    primaryIdeal < 0 ||
+    primaryMaximum < primaryIdeal
   ) {
     return false;
+  }
+
+
+  if (item.partnerWorkLocation?.trim()) {
+    const partnerMode = item.partnerCommuteMode ?? primaryMode;
+    const partnerIdeal = item.partnerIdealCommuteMinutes ?? primaryIdeal;
+    const partnerMaximum = item.partnerMaxCommuteMinutes ?? primaryMaximum;
+    if (partnerMode === "not_important" || partnerIdeal === null || partnerMaximum === null || partnerIdeal < 0 || partnerMaximum < partnerIdeal) return false;
   }
 
   if (item.educationNeed === "none") return item.educationStages.length === 0;
@@ -109,8 +163,9 @@ export function loadBuyerPreferences(): BuyerPreferencesLoadResult {
         message: "已保存的偏好数据格式无效。请重新填写；下次保存会覆盖这份数据。",
       };
     }
-    if (isBuyerPreferences(envelope.preferences)) {
-      return { status: "valid", preferences: envelope.preferences };
+    const sanitizedPreferences = sanitizeOptionalLocations(envelope.preferences);
+    if (isBuyerPreferences(sanitizedPreferences)) {
+      return { status: "valid", preferences: sanitizedPreferences };
     }
 
     const migratedPreferences = migrateLegacyBuyerPreferences(envelope.preferences);

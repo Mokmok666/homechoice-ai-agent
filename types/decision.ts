@@ -1,5 +1,6 @@
 import type { BuyerPreferences } from "./buyer-preferences";
 import type { Property } from "./property";
+import type { GeoEvidenceByProperty } from "./geo-evidence";
 
 export const DIMENSION_KEYS = [
   "location_maturity",
@@ -27,6 +28,7 @@ export type EvidenceSource =
   | "buyer_preference"
   | "manual"
   | "confirmed_comparable"
+  | "amap"
   | "derived";
 export type AnalysisConfidence = "provisional" | "supported";
 export type Recommendation = "CONSIDER" | "WAIT" | "PASS";
@@ -108,6 +110,7 @@ export interface DecisionEngineInput {
   properties: Property[];
   preferences: BuyerPreferences;
   asOfDate: string;
+  geoEvidenceByProperty?: GeoEvidenceByProperty;
 }
 
 export interface DecisionEngineResult {

@@ -1,5 +1,6 @@
 const AMAP_NEARBY_ENDPOINT = "https://restapi.amap.com/v5/place/around";
 const AMAP_NEARBY_RADIUS_METERS = 1_000;
+const AMAP_METRO_SEARCH_RADIUS_METERS = 5_000;
 const AMAP_REQUEST_TIMEOUT_MS = 10_000;
 const MAX_EXAMPLES = 5;
 
@@ -17,6 +18,13 @@ export interface NearbyCoordinates {
 }
 
 export interface NearbyPoiResult {
+  availability: {
+    metro: boolean;
+    commercial: boolean;
+    supermarket: boolean;
+    medical: boolean;
+    park: boolean;
+  };
   metro: {
     nearest?: {
       name: string;
@@ -27,6 +35,7 @@ export interface NearbyPoiResult {
   };
   commercial: {
     countWithin1000m: number;
+    hasMajorDestination: boolean;
     examples: string[];
   };
   dailyLife: {
@@ -142,11 +151,12 @@ async function searchNearbyByTypes(
   coordinates: NearbyCoordinates,
   types: string,
   apiKey: string,
+  radiusMeters = AMAP_NEARBY_RADIUS_METERS,
 ): Promise<PoiSearchResult> {
   const url = new URL(AMAP_NEARBY_ENDPOINT);
   url.searchParams.set("key", apiKey);
   url.searchParams.set("location", `${coordinates.lng.toFixed(6)},${coordinates.lat.toFixed(6)}`);
-  url.searchParams.set("radius", String(AMAP_NEARBY_RADIUS_METERS));
+  url.searchParams.set("radius", String(radiusMeters));
   url.searchParams.set("types", types);
   url.searchParams.set("sortrule", "distance");
   url.searchParams.set("page_size", "25");
@@ -200,22 +210,47 @@ export async function getNearbyPoiEvidence(
     throw new AMapNearbyError("AMAP_NOT_CONFIGURED", "高德 Web 服务尚未配置。");
   }
 
-  const [metro, commercial, supermarket, medical, park] = await Promise.all([
-    searchNearbyByTypes(coordinates, POI_TYPES.metro, apiKey),
+  const settled = await Promise.allSettled([
+    searchNearbyByTypes(coordinates, POI_TYPES.metro, apiKey, AMAP_METRO_SEARCH_RADIUS_METERS),
     searchNearbyByTypes(coordinates, POI_TYPES.commercial, apiKey),
     searchNearbyByTypes(coordinates, POI_TYPES.supermarket, apiKey),
     searchNearbyByTypes(coordinates, POI_TYPES.medical, apiKey),
     searchNearbyByTypes(coordinates, POI_TYPES.park, apiKey),
   ]);
+  if (settled.every((result) => result.status === "rejected")) {
+    const firstError = settled.find((result) => result.status === "rejected");
+    throw firstError?.status === "rejected" && firstError.reason instanceof AMapNearbyError
+      ? firstError.reason
+      : new AMapNearbyError("AMAP_API_ERROR", "高德周边 POI 请求全部失败。");
+  }
+
+  const emptySearch: PoiSearchResult = { count: 0, pois: [] };
+  const metroAvailable = settled[0].status === "fulfilled";
+  const commercialAvailable = settled[1].status === "fulfilled";
+  const supermarketAvailable = settled[2].status === "fulfilled";
+  const medicalAvailable = settled[3].status === "fulfilled";
+  const parkAvailable = settled[4].status === "fulfilled";
+  const metro = settled[0].status === "fulfilled" ? settled[0].value : emptySearch;
+  const commercial = settled[1].status === "fulfilled" ? settled[1].value : emptySearch;
+  const supermarket = settled[2].status === "fulfilled" ? settled[2].value : emptySearch;
+  const medical = settled[3].status === "fulfilled" ? settled[3].value : emptySearch;
+  const park = settled[4].status === "fulfilled" ? settled[4].value : emptySearch;
 
   const mainMetroStations = metro.pois.filter((poi) => poi.typecode === "150500");
   const metroCandidates = mainMetroStations.length > 0 ? mainMetroStations : metro.pois;
-  const nearestMetro = metroCandidates
-    .map((poi) => ({ poi, distanceMeters: Math.round(distanceInMeters(coordinates, poi.location)) }))
-    .filter((item) => item.distanceMeters <= AMAP_NEARBY_RADIUS_METERS)
+  const metroWithDistance = metroCandidates
+    .map((poi) => ({ poi, distanceMeters: Math.round(distanceInMeters(coordinates, poi.location)) }));
+  const nearestMetro = metroWithDistance
     .sort((left, right) => left.distanceMeters - right.distanceMeters)[0];
 
   return {
+    availability: {
+      metro: metroAvailable,
+      commercial: commercialAvailable,
+      supermarket: supermarketAvailable,
+      medical: medicalAvailable,
+      park: parkAvailable,
+    },
     metro: {
       ...(nearestMetro ? {
         nearest: {
@@ -224,16 +259,20 @@ export async function getNearbyPoiEvidence(
           location: nearestMetro.poi.location,
         },
       } : {}),
-      countWithin1000m: mainMetroStations.length > 0 ? mainMetroStations.length : metro.count,
+      countWithin1000m: metroWithDistance.filter((item) => item.distanceMeters <= AMAP_NEARBY_RADIUS_METERS).length,
     },
     commercial: {
-      countWithin1000m: commercial.count,
+      countWithin1000m: commercial.pois.length,
+      hasMajorDestination: commercial.pois.some((poi) =>
+        poi.typecode?.startsWith("0601") === true ||
+        /商场|购物中心|商业综合体|购物广场|商业广场/.test(poi.name)
+      ),
       examples: uniqueExamples([commercial.pois]),
     },
     dailyLife: {
-      supermarketCount: supermarket.count,
-      medicalCount: medical.count,
-      parkCount: park.count,
+      supermarketCount: supermarket.pois.length,
+      medicalCount: medical.pois.length,
+      parkCount: park.pois.length,
       examples: uniqueExamples([supermarket.pois, medical.pois, park.pois]),
     },
     fetchedAt: new Date().toISOString(),

@@ -4,9 +4,11 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AlertCircle, ArrowLeft, CheckCircle2, Clock3, Database, HelpCircle, Sparkles } from "lucide-react";
 import { ScoreRing } from "@/components/decision/score-ring";
+import { refreshGeoEvidenceForProperties } from "@/lib/amap/evidence-client";
 import { loadBuyerPreferences } from "@/lib/buyer-preferences-storage";
 import { DIMENSION_LABELS, DIMENSION_TYPE_LABELS, DIMENSION_TYPES } from "@/lib/decision/dimensions";
 import { runDecisionEngine } from "@/lib/decision/engine";
+import { loadCachedGeoEvidenceForProperties } from "@/lib/geo-evidence-storage";
 import { getProperties } from "@/lib/property-storage";
 import type { DimensionEvaluation, PropertyDecisionResult } from "@/types/decision";
 import type { Property } from "@/types/property";
@@ -19,6 +21,9 @@ const RECOMMENDATION_LABELS = {
 } as const;
 
 function dimensionStatusLabel(dimension: DimensionEvaluation): string {
+  if (dimension.evidence.some((item) => item.source === "amap")) {
+    return dimension.status === "known" ? "高德已核验" : "部分证据";
+  }
   if (DIMENSION_TYPES[dimension.key] === "ai") return "AI分析";
   if (dimension.status === "known") return "已知";
   if (dimension.status === "partial") return "部分证据";
@@ -37,29 +42,79 @@ export function DecisionDetail({ propertyId }: { propertyId: string }) {
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    const controller = new AbortController();
     const properties = getProperties().filter((property) => property.source === "manual");
     const property = properties.find((item) => item.id === propertyId);
     if (!property) {
       setMessage("该房源已被删除、不可用，或属于不参与真实分析的演示数据。");
-      return;
+      return () => controller.abort();
     }
     const preferences = loadBuyerPreferences();
     if (preferences.status !== "valid") {
       setMessage("购房偏好不可用，请重新保存偏好后再查看分析。");
-      return;
+      return () => controller.abort();
     }
     const asOfDate = new Date().toISOString().slice(0, 10);
     try {
-      const engine = runDecisionEngine({ properties, preferences: preferences.preferences, asOfDate });
+      const cachedGeoEvidence = loadCachedGeoEvidenceForProperties(properties, preferences.preferences);
+      let latestGeoEvidence = { ...cachedGeoEvidence };
+      const engine = runDecisionEngine({
+        properties,
+        preferences: preferences.preferences,
+        asOfDate,
+        geoEvidenceByProperty: cachedGeoEvidence,
+      });
       const result = engine.results.find((item) => item.propertyId === propertyId);
       if (!result) {
         setMessage("该房源没有可用的分析结果。");
-        return;
+        return () => controller.abort();
       }
       setState({ property, result, asOfDate, rankingProvisional: engine.rankingProvisional });
+      const refreshOrder = [property, ...properties.filter((item) => item.id !== property.id)];
+      void refreshGeoEvidenceForProperties(refreshOrder, preferences.preferences, (updatedPropertyId, evidence) => {
+        if (controller.signal.aborted) return;
+        latestGeoEvidence = { ...latestGeoEvidence, [updatedPropertyId]: evidence };
+        const progressivelyUpdatedEngine = runDecisionEngine({
+          properties,
+          preferences: preferences.preferences,
+          asOfDate,
+          geoEvidenceByProperty: latestGeoEvidence,
+        });
+        const progressivelyUpdatedResult = progressivelyUpdatedEngine.results.find((item) => item.propertyId === propertyId);
+        if (progressivelyUpdatedResult) setState({
+          property,
+          result: progressivelyUpdatedResult,
+          asOfDate,
+          rankingProvisional: progressivelyUpdatedEngine.rankingProvisional,
+        });
+      })
+        .then((geoEvidenceByProperty) => {
+          if (controller.signal.aborted) return;
+          const engineWithGeoEvidence = runDecisionEngine({
+            properties,
+            preferences: preferences.preferences,
+            asOfDate,
+            geoEvidenceByProperty,
+          });
+          const resultWithGeoEvidence = engineWithGeoEvidence.results.find((item) => item.propertyId === propertyId);
+          if (resultWithGeoEvidence) {
+            setState({
+              property,
+              result: resultWithGeoEvidence,
+              asOfDate,
+              rankingProvisional: engineWithGeoEvidence.rankingProvisional,
+            });
+          }
+        })
+        .catch((error: unknown) => {
+          if (!(error instanceof Error && error.name === "AbortError")) {
+            // AMap evidence is optional; keep the base Decision Engine result.
+          }
+        });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "无法生成房源分析。");
     }
+    return () => controller.abort();
   }, [propertyId]);
 
   if (message) {
@@ -126,10 +181,10 @@ export function DecisionDetail({ propertyId }: { propertyId: string }) {
         <div className="mt-6 grid gap-3 lg:grid-cols-2">
           {result.dimensions.map((dimension) => (
             <article key={dimension.key} className="rounded-xl border border-[#e8e6e0] p-4">
-              <div className="flex items-center justify-between gap-4"><div><h3 className="font-medium">{DIMENSION_LABELS[dimension.key]}</h3><p className="mt-1 text-[11px] text-[#93948f]">{DIMENSION_TYPE_LABELS[DIMENSION_TYPES[dimension.key]]} · 最终权重 {dimension.finalWeight.toFixed(1)}%</p></div><div className="text-right"><b className="text-xl text-[#617359]">{dimension.score ?? "—"}</b><span className="ml-2 rounded-full bg-[#f1f0eb] px-2 py-1 text-[10px] text-[#737570]">{dimensionStatusLabel(dimension)}</span></div></div>
+              <div className="flex items-center justify-between gap-4"><div><h3 className="font-medium">{DIMENSION_LABELS[dimension.key]}</h3><p className="mt-1 text-[11px] text-[#93948f]">{dimension.evidence.some((item) => item.source === "amap") ? "高德地图证据" : DIMENSION_TYPE_LABELS[DIMENSION_TYPES[dimension.key]]} · 最终权重 {dimension.finalWeight.toFixed(1)}%</p></div><div className="text-right"><b className="text-xl text-[#617359]">{dimension.score ?? "—"}</b><span className="ml-2 rounded-full bg-[#f1f0eb] px-2 py-1 text-[10px] text-[#737570]">{dimensionStatusLabel(dimension)}</span></div></div>
               {dimension.score !== null && <div className="progress mt-3"><span style={{ width: `${dimension.score}%` }} /></div>}
               {dimension.evidence.length > 0 && <ul className="mt-3 space-y-1 text-xs leading-5 text-[#6f726d]">{dimension.evidence.map((item) => <li key={`${item.source}-${item.description}`} className="flex gap-2"><CheckCircle2 size={13} className="mt-1 shrink-0 text-[#75886d]" />{item.description}</li>)}</ul>}
-              {dimension.missingInputs.length > 0 && <p className="mt-3 flex items-start gap-2 text-xs leading-5 text-[#8a7046]"><HelpCircle size={13} className="mt-1 shrink-0" />{DIMENSION_TYPES[dimension.key] === "ai" ? "AI分析" : "可进一步确认"}：{dimension.missingInputs.join("、")}</p>}
+              {dimension.missingInputs.length > 0 && <p className="mt-3 flex items-start gap-2 text-xs leading-5 text-[#8a7046]"><HelpCircle size={13} className="mt-1 shrink-0" />{dimension.evidence.some((item) => item.source === "amap") || DIMENSION_TYPES[dimension.key] !== "ai" ? "可进一步确认" : "AI分析"}：{dimension.missingInputs.join("、")}</p>}
             </article>
           ))}
         </div>

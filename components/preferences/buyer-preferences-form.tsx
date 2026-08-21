@@ -2,14 +2,15 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Check, GraduationCap, LockKeyhole, MapPin, WalletCards } from "lucide-react";
+import { ArrowRight, Check, GraduationCap, LockKeyhole, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { loadBuyerPreferences, saveBuyerPreferences } from "@/lib/buyer-preferences-storage";
+import { WorkLocationConfirmation } from "./work-location-confirmation";
 import {
-  COMMUTE_MODES,
+  SELECTABLE_COMMUTE_MODES,
   DECISION_PRIORITIES,
   EDUCATION_NEEDS,
   EDUCATION_STAGES,
@@ -17,6 +18,8 @@ import {
   type BuyerPreferences,
   type BuyerPreferencesInput,
   type CommuteMode,
+  type ConfirmedWorkLocation,
+  type SelectableCommuteMode,
   type DecisionPriority,
   type EducationNeed,
   type EducationStage,
@@ -36,9 +39,14 @@ interface PreferenceFormState {
   maximumBudget: string;
   primaryWorkLocation: string;
   partnerWorkLocation: string;
-  commuteMode: CommuteMode | "";
-  idealCommuteMinutes: string;
-  maxCommuteMinutes: string;
+  primaryWorkLocationConfirmed: ConfirmedWorkLocation | null;
+  partnerWorkLocationConfirmed: ConfirmedWorkLocation | null;
+  primaryCommuteMode: SelectableCommuteMode | "";
+  primaryIdealCommuteMinutes: string;
+  primaryMaxCommuteMinutes: string;
+  partnerCommuteMode: SelectableCommuteMode | "";
+  partnerIdealCommuteMinutes: string;
+  partnerMaxCommuteMinutes: string;
   educationNeed: EducationNeed | "";
   educationStages: EducationStage[];
   topPriorities: DecisionPriority[];
@@ -52,9 +60,14 @@ const EMPTY_FORM: PreferenceFormState = {
   maximumBudget: "",
   primaryWorkLocation: "",
   partnerWorkLocation: "",
-  commuteMode: "",
-  idealCommuteMinutes: "",
-  maxCommuteMinutes: "",
+  primaryWorkLocationConfirmed: null,
+  partnerWorkLocationConfirmed: null,
+  primaryCommuteMode: "",
+  primaryIdealCommuteMinutes: "",
+  primaryMaxCommuteMinutes: "",
+  partnerCommuteMode: "",
+  partnerIdealCommuteMinutes: "",
+  partnerMaxCommuteMinutes: "",
   educationNeed: "",
   educationStages: [],
   topPriorities: [],
@@ -68,17 +81,26 @@ function validateForm(form: PreferenceFormState): FormErrors {
   if (!form.maximumBudget.trim()) errors.maximumBudget = "请输入最高可接受总价。";
   else if (!Number.isFinite(budget) || budget <= 0) errors.maximumBudget = "最高可接受总价必须是大于 0 的数字。";
 
-  if (!form.commuteMode) {
-    errors.commuteMode = "请选择通勤方式。";
-  } else if (form.commuteMode !== "not_important") {
+  if (!form.primaryCommuteMode) {
+    errors.primaryCommuteMode = "请选择你的通勤方式。";
+  } else if (form.primaryCommuteMode !== "not_important") {
     if (!form.primaryWorkLocation.trim()) errors.primaryWorkLocation = "请输入主要工作地点。";
-    const ideal = Number(form.idealCommuteMinutes);
-    const maximum = Number(form.maxCommuteMinutes);
-    if (!form.idealCommuteMinutes.trim()) errors.idealCommuteMinutes = "请输入理想单程通勤时间。";
-    else if (!Number.isFinite(ideal) || ideal < 0) errors.idealCommuteMinutes = "理想通勤时间必须是大于或等于 0 的数字。";
-    if (!form.maxCommuteMinutes.trim()) errors.maxCommuteMinutes = "请输入最长可接受单程通勤时间。";
-    else if (!Number.isFinite(maximum) || maximum < 0) errors.maxCommuteMinutes = "最长通勤时间必须是大于或等于 0 的数字。";
-    else if (!errors.idealCommuteMinutes && maximum < ideal) errors.maxCommuteMinutes = "最长通勤时间不能小于理想通勤时间。";
+    else if (!form.primaryWorkLocationConfirmed) errors.primaryWorkLocation = "请查找并确认你的工作地点。";
+    const ideal = Number(form.primaryIdealCommuteMinutes);
+    const maximum = Number(form.primaryMaxCommuteMinutes);
+    if (!form.primaryIdealCommuteMinutes.trim()) errors.primaryIdealCommuteMinutes = "请输入理想单程通勤时间。";
+    else if (!Number.isFinite(ideal) || ideal < 0) errors.primaryIdealCommuteMinutes = "理想通勤时间必须是大于或等于 0 的数字。";
+    if (!form.primaryMaxCommuteMinutes.trim()) errors.primaryMaxCommuteMinutes = "请输入最长可接受单程通勤时间。";
+    else if (!Number.isFinite(maximum) || maximum < 0) errors.primaryMaxCommuteMinutes = "最长通勤时间必须是大于或等于 0 的数字。";
+    else if (!errors.primaryIdealCommuteMinutes && maximum < ideal) errors.primaryMaxCommuteMinutes = "最长通勤时间不能小于理想通勤时间。";
+  }
+  if (form.partnerWorkLocation.trim()) {
+    if (!form.partnerWorkLocationConfirmed) errors.partnerWorkLocation = "请查找并确认伴侣工作地点，或移除该地点。";
+    if (!form.partnerCommuteMode || form.partnerCommuteMode === "not_important") errors.partnerCommuteMode = "请选择伴侣的通勤方式。";
+    const ideal = Number(form.partnerIdealCommuteMinutes);
+    const maximum = Number(form.partnerMaxCommuteMinutes);
+    if (!form.partnerIdealCommuteMinutes.trim() || !Number.isFinite(ideal) || ideal < 0) errors.partnerIdealCommuteMinutes = "请输入有效的伴侣理想通勤时间。";
+    if (!form.partnerMaxCommuteMinutes.trim() || !Number.isFinite(maximum) || maximum < ideal) errors.partnerMaxCommuteMinutes = "伴侣最长通勤时间不能小于理想时间。";
   }
 
   if (!form.educationNeed) errors.educationNeed = "请选择教育需求。";
@@ -146,9 +168,14 @@ export function BuyerPreferencesForm() {
       maximumBudget: String(saved.maximumBudget),
       primaryWorkLocation: saved.primaryWorkLocation,
       partnerWorkLocation: saved.partnerWorkLocation ?? "",
-      commuteMode: saved.commuteMode,
-      idealCommuteMinutes: saved.idealCommuteMinutes === null ? "" : String(saved.idealCommuteMinutes),
-      maxCommuteMinutes: saved.maxCommuteMinutes === null ? "" : String(saved.maxCommuteMinutes),
+      primaryWorkLocationConfirmed: saved.primaryWorkLocationConfirmed ?? null,
+      partnerWorkLocationConfirmed: saved.partnerWorkLocationConfirmed ?? null,
+      primaryCommuteMode: saved.primaryCommuteMode ?? (saved.commuteMode === "both" ? "flexible" : saved.commuteMode),
+      primaryIdealCommuteMinutes: (saved.primaryIdealCommuteMinutes ?? saved.idealCommuteMinutes) === null ? "" : String(saved.primaryIdealCommuteMinutes ?? saved.idealCommuteMinutes),
+      primaryMaxCommuteMinutes: (saved.primaryMaxCommuteMinutes ?? saved.maxCommuteMinutes) === null ? "" : String(saved.primaryMaxCommuteMinutes ?? saved.maxCommuteMinutes),
+      partnerCommuteMode: saved.partnerWorkLocation ? (saved.partnerCommuteMode ?? saved.primaryCommuteMode ?? (saved.commuteMode === "both" ? "flexible" : saved.commuteMode)) : "",
+      partnerIdealCommuteMinutes: saved.partnerWorkLocation && (saved.partnerIdealCommuteMinutes ?? saved.primaryIdealCommuteMinutes ?? saved.idealCommuteMinutes) !== null ? String(saved.partnerIdealCommuteMinutes ?? saved.primaryIdealCommuteMinutes ?? saved.idealCommuteMinutes) : "",
+      partnerMaxCommuteMinutes: saved.partnerWorkLocation && (saved.partnerMaxCommuteMinutes ?? saved.primaryMaxCommuteMinutes ?? saved.maxCommuteMinutes) !== null ? String(saved.partnerMaxCommuteMinutes ?? saved.primaryMaxCommuteMinutes ?? saved.maxCommuteMinutes) : "",
       educationNeed: saved.educationNeed,
       educationStages: saved.educationStages,
       topPriorities: saved.topPriorities,
@@ -160,14 +187,14 @@ export function BuyerPreferencesForm() {
     if (errors[field] || errors.form) setErrors((current) => ({ ...current, [field]: undefined, form: undefined }));
   }
 
-  function selectCommuteMode(mode: CommuteMode) {
+  function selectPrimaryCommuteMode(mode: SelectableCommuteMode) {
     setForm((current) => ({
       ...current,
-      commuteMode: mode,
-      idealCommuteMinutes: mode === "not_important" ? "" : current.idealCommuteMinutes,
-      maxCommuteMinutes: mode === "not_important" ? "" : current.maxCommuteMinutes,
+      primaryCommuteMode: mode,
+      primaryIdealCommuteMinutes: mode === "not_important" ? "" : current.primaryIdealCommuteMinutes,
+      primaryMaxCommuteMinutes: mode === "not_important" ? "" : current.primaryMaxCommuteMinutes,
     }));
-    setErrors((current) => ({ ...current, commuteMode: undefined, primaryWorkLocation: undefined, idealCommuteMinutes: undefined, maxCommuteMinutes: undefined }));
+    setErrors((current) => ({ ...current, primaryCommuteMode: undefined, primaryWorkLocation: undefined, primaryIdealCommuteMinutes: undefined, primaryMaxCommuteMinutes: undefined }));
   }
 
   function selectEducationNeed(value: EducationNeed) {
@@ -209,9 +236,17 @@ export function BuyerPreferencesForm() {
       maximumBudget: Number(form.maximumBudget),
       primaryWorkLocation: form.primaryWorkLocation.trim(),
       partnerWorkLocation: form.partnerWorkLocation.trim() || null,
-      commuteMode: form.commuteMode as CommuteMode,
-      idealCommuteMinutes: form.commuteMode === "not_important" ? null : Number(form.idealCommuteMinutes),
-      maxCommuteMinutes: form.commuteMode === "not_important" ? null : Number(form.maxCommuteMinutes),
+      primaryWorkLocationConfirmed: form.primaryWorkLocationConfirmed,
+      partnerWorkLocationConfirmed: form.partnerWorkLocation.trim() ? form.partnerWorkLocationConfirmed : null,
+      primaryCommuteMode: form.primaryCommuteMode as SelectableCommuteMode,
+      primaryIdealCommuteMinutes: form.primaryCommuteMode === "not_important" ? null : Number(form.primaryIdealCommuteMinutes),
+      primaryMaxCommuteMinutes: form.primaryCommuteMode === "not_important" ? null : Number(form.primaryMaxCommuteMinutes),
+      partnerCommuteMode: form.partnerWorkLocation.trim() ? form.partnerCommuteMode as SelectableCommuteMode : null,
+      partnerIdealCommuteMinutes: form.partnerWorkLocation.trim() ? Number(form.partnerIdealCommuteMinutes) : null,
+      partnerMaxCommuteMinutes: form.partnerWorkLocation.trim() ? Number(form.partnerMaxCommuteMinutes) : null,
+      commuteMode: (form.primaryCommuteMode === "flexible" ? "both" : form.primaryCommuteMode) as CommuteMode,
+      idealCommuteMinutes: form.primaryCommuteMode === "not_important" ? null : Number(form.primaryIdealCommuteMinutes),
+      maxCommuteMinutes: form.primaryCommuteMode === "not_important" ? null : Number(form.primaryMaxCommuteMinutes),
       educationNeed: form.educationNeed as EducationNeed,
       educationStages: form.educationNeed === "none" ? [] : form.educationStages,
       topPriorities: form.topPriorities,
@@ -256,13 +291,20 @@ export function BuyerPreferencesForm() {
             <SectionHeading number="03" title="家庭通勤" description="记录家庭可接受的通勤方式与时间边界。" />
             <CardContent className="space-y-6 px-6 py-7 sm:px-8">
               <div className="grid gap-5 sm:grid-cols-2">
-                <div><Label htmlFor="primaryWorkLocation">主要工作地点{form.commuteMode !== "not_important" ? " *" : ""}</Label><div className="relative mt-2"><MapPin size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#8a8d87]" /><Input id="primaryWorkLocation" className="pl-11" value={form.primaryWorkLocation} onChange={(event) => updateField("primaryWorkLocation", event.target.value)} placeholder="例如：珠江新城" {...errorProps("primaryWorkLocation")} /></div><FieldError id="primaryWorkLocation-error" message={errors.primaryWorkLocation} /></div>
-                <div><Label htmlFor="partnerWorkLocation">伴侣工作地点（选填）</Label><Input id="partnerWorkLocation" className="mt-2" value={form.partnerWorkLocation} onChange={(event) => updateField("partnerWorkLocation", event.target.value)} placeholder="例如：琶洲" /></div>
+                <WorkLocationConfirmation id="primaryWorkLocation" label="我的工作地点" required={form.primaryCommuteMode !== "not_important"} keyword={form.primaryWorkLocation} confirmedLocation={form.primaryWorkLocationConfirmed} error={errors.primaryWorkLocation} onKeywordChange={(value) => updateField("primaryWorkLocation", value)} onConfirm={(location) => updateField("primaryWorkLocationConfirmed", location)} />
+                <WorkLocationConfirmation id="partnerWorkLocation" label="伴侣工作地点（选填）" keyword={form.partnerWorkLocation} confirmedLocation={form.partnerWorkLocationConfirmed} error={errors.partnerWorkLocation} onKeywordChange={(value) => updateField("partnerWorkLocation", value)} onConfirm={(location) => updateField("partnerWorkLocationConfirmed", location)} />
               </div>
-              <div><Label>通勤方式 *</Label><div className="mt-2 grid gap-3 sm:grid-cols-2" aria-invalid={Boolean(errors.commuteMode)} aria-describedby={errors.commuteMode ? "commuteMode-error" : undefined}>{COMMUTE_MODES.map((mode) => <ChoiceButton key={mode} selected={form.commuteMode === mode} onClick={() => selectCommuteMode(mode)}>{COMMUTE_MODE_LABELS[mode]}</ChoiceButton>)}</div><FieldError id="commuteMode-error" message={errors.commuteMode} /></div>
-              {form.commuteMode !== "not_important" && <div className="grid gap-5 sm:grid-cols-2">
-                <div><Label htmlFor="idealCommuteMinutes">理想单程通勤时间（分钟）*</Label><Input id="idealCommuteMinutes" className="mt-2" type="number" min="0" step="1" inputMode="numeric" value={form.idealCommuteMinutes} onChange={(event) => updateField("idealCommuteMinutes", event.target.value)} placeholder="例如：30" {...errorProps("idealCommuteMinutes")} /><FieldError id="idealCommuteMinutes-error" message={errors.idealCommuteMinutes} /></div>
-                <div><Label htmlFor="maxCommuteMinutes">最长可接受单程通勤时间（分钟）*</Label><Input id="maxCommuteMinutes" className="mt-2" type="number" min="0" step="1" inputMode="numeric" value={form.maxCommuteMinutes} onChange={(event) => updateField("maxCommuteMinutes", event.target.value)} placeholder="例如：50" {...errorProps("maxCommuteMinutes")} /><FieldError id="maxCommuteMinutes-error" message={errors.maxCommuteMinutes} /></div>
+              <div><Label>你的通勤方式 *</Label><div className="mt-2 grid gap-3 sm:grid-cols-2" aria-invalid={Boolean(errors.primaryCommuteMode)} aria-describedby={errors.primaryCommuteMode ? "primaryCommuteMode-error" : undefined}>{SELECTABLE_COMMUTE_MODES.map((mode) => <ChoiceButton key={mode} selected={form.primaryCommuteMode === mode} onClick={() => selectPrimaryCommuteMode(mode)}>{COMMUTE_MODE_LABELS[mode]}</ChoiceButton>)}</div><FieldError id="primaryCommuteMode-error" message={errors.primaryCommuteMode} /></div>
+              {form.primaryCommuteMode !== "not_important" && <div className="grid gap-5 sm:grid-cols-2">
+                <div><Label htmlFor="primaryIdealCommuteMinutes">你的理想单程时间（分钟）*</Label><Input id="primaryIdealCommuteMinutes" className="mt-2" type="number" min="0" step="1" inputMode="numeric" value={form.primaryIdealCommuteMinutes} onChange={(event) => updateField("primaryIdealCommuteMinutes", event.target.value)} placeholder="例如：30" {...errorProps("primaryIdealCommuteMinutes")} /><FieldError id="primaryIdealCommuteMinutes-error" message={errors.primaryIdealCommuteMinutes} /></div>
+                <div><Label htmlFor="primaryMaxCommuteMinutes">你的最长可接受时间（分钟）*</Label><Input id="primaryMaxCommuteMinutes" className="mt-2" type="number" min="0" step="1" inputMode="numeric" value={form.primaryMaxCommuteMinutes} onChange={(event) => updateField("primaryMaxCommuteMinutes", event.target.value)} placeholder="例如：50" {...errorProps("primaryMaxCommuteMinutes")} /><FieldError id="primaryMaxCommuteMinutes-error" message={errors.primaryMaxCommuteMinutes} /></div>
+              </div>}
+              {form.partnerWorkLocation.trim() && <div className="space-y-5 rounded-2xl border border-[#e5e3dc] bg-[#faf9f6] p-5">
+                <div><Label>伴侣通勤方式 *</Label><div className="mt-2 grid gap-3 sm:grid-cols-2">{SELECTABLE_COMMUTE_MODES.filter((mode) => mode !== "not_important").map((mode) => <ChoiceButton key={mode} selected={form.partnerCommuteMode === mode} onClick={() => updateField("partnerCommuteMode", mode)}>{COMMUTE_MODE_LABELS[mode]}</ChoiceButton>)}</div><FieldError id="partnerCommuteMode-error" message={errors.partnerCommuteMode} /></div>
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <div><Label htmlFor="partnerIdealCommuteMinutes">伴侣理想单程时间（分钟）*</Label><Input id="partnerIdealCommuteMinutes" className="mt-2" type="number" min="0" step="1" value={form.partnerIdealCommuteMinutes} onChange={(event) => updateField("partnerIdealCommuteMinutes", event.target.value)} /><FieldError id="partnerIdealCommuteMinutes-error" message={errors.partnerIdealCommuteMinutes} /></div>
+                  <div><Label htmlFor="partnerMaxCommuteMinutes">伴侣最长可接受时间（分钟）*</Label><Input id="partnerMaxCommuteMinutes" className="mt-2" type="number" min="0" step="1" value={form.partnerMaxCommuteMinutes} onChange={(event) => updateField("partnerMaxCommuteMinutes", event.target.value)} /><FieldError id="partnerMaxCommuteMinutes-error" message={errors.partnerMaxCommuteMinutes} /></div>
+                </div>
               </div>}
               <p className="rounded-xl bg-[#f4f3ef] px-4 py-3 text-xs leading-5 text-[#666962]">当前阶段只记录你的通勤偏好，真实通勤时间将在后续分析阶段计算。</p>
             </CardContent>

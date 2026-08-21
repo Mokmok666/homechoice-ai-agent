@@ -8,6 +8,7 @@ import { DecisionPropertyCard } from "@/components/decision/decision-property-ca
 import { PropertyIntelligenceCard } from "@/components/intelligence/property-intelligence-card";
 import { Button } from "@/components/ui/button";
 import { findAIAnalysisBySignature } from "@/lib/ai-analysis-storage";
+import { refreshGeoEvidenceForProperties } from "@/lib/amap/evidence-client";
 import { projectAIAnalysisContext } from "@/lib/ai/input";
 import { validatePropertyIntelligence } from "@/lib/ai/property-intelligence-validation";
 import { createAIInputSignature } from "@/lib/ai/signature";
@@ -15,6 +16,7 @@ import { BUYER_PREFERENCES_STORAGE_KEY, loadBuyerPreferences } from "@/lib/buyer
 import { createDecisionPropertyView, validateTextField } from "@/lib/decision/dataQuality";
 import { runDecisionEngine } from "@/lib/decision/engine";
 import { saveDecisionHistory } from "@/lib/decision-history-storage";
+import { GEO_EVIDENCE_STORAGE_KEY, loadCachedGeoEvidenceForProperties } from "@/lib/geo-evidence-storage";
 import { getProperties, PROPERTY_STORAGE_KEY } from "@/lib/property-storage";
 import type { BuyerPreferences } from "@/types/buyer-preferences";
 import type { DecisionEngineResult } from "@/types/decision";
@@ -26,6 +28,7 @@ interface ResultsState {
   preferences: BuyerPreferences | null;
   engine: DecisionEngineResult | null;
   message: string | null;
+  geoEvidenceCount: number;
 }
 
 const RECOMMENDATION_LABELS = {
@@ -33,6 +36,13 @@ const RECOMMENDATION_LABELS = {
   WAIT: "谨慎考虑",
   PASS: "暂不推荐",
 } as const;
+
+function countUsableGeoEvidence(evidenceByProperty: Parameters<typeof runDecisionEngine>[0]["geoEvidenceByProperty"]): number {
+  return Object.values(evidenceByProperty ?? {}).reduce(
+    (count, evidence) => count + Object.values(evidence).filter((item) => item?.status !== "insufficient").length,
+    0,
+  );
+}
 
 function getAIOverallSummary(
   properties: Property[],
@@ -101,13 +111,17 @@ function createPropertyIntelligenceRequest(
 }
 
 export function DecisionResults() {
-  const [state, setState] = useState<ResultsState>({ properties: [], preferences: null, engine: null, message: null });
+  const [state, setState] = useState<ResultsState>({ properties: [], preferences: null, engine: null, message: null, geoEvidenceCount: 0 });
   const [isLoading, setIsLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
   const [intelligenceByProperty, setIntelligenceByProperty] = useState<Record<string, IntelligenceState>>({});
   const intelligenceRequestsRef = useRef(new Map<string, AbortController>());
+  const geoRequestRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(() => {
+    geoRequestRef.current?.abort();
+    const geoController = new AbortController();
+    geoRequestRef.current = geoController;
     intelligenceRequestsRef.current.forEach((controller) => controller.abort());
     intelligenceRequestsRef.current.clear();
     setIntelligenceByProperty({});
@@ -120,22 +134,74 @@ export function DecisionResults() {
         preferences: null,
         engine: null,
         message: preferencesResult.status === "invalid" ? preferencesResult.message : "请先完成并保存购房偏好。",
+        geoEvidenceCount: 0,
       });
       setIsLoading(false);
       return;
     }
     if (manualProperties.length === 0) {
-      setState({ properties: [], preferences: preferencesResult.preferences, engine: null, message: "当前没有可用于真实分析的手动录入房源。演示 Mock 房源不会参与真实排序。" });
+      setState({ properties: [], preferences: preferencesResult.preferences, engine: null, message: "当前没有可用于真实分析的手动录入房源。演示 Mock 房源不会参与真实排序。", geoEvidenceCount: 0 });
       setIsLoading(false);
       return;
     }
 
     const asOfDate = new Date().toISOString().slice(0, 10);
     try {
-      const engine = runDecisionEngine({ properties: manualProperties, preferences: preferencesResult.preferences, asOfDate });
-      setState({ properties: manualProperties, preferences: preferencesResult.preferences, engine, message: null });
+      const cachedGeoEvidence = loadCachedGeoEvidenceForProperties(manualProperties, preferencesResult.preferences);
+      let latestGeoEvidence = { ...cachedGeoEvidence };
+      const engine = runDecisionEngine({
+        properties: manualProperties,
+        preferences: preferencesResult.preferences,
+        asOfDate,
+        geoEvidenceByProperty: cachedGeoEvidence,
+      });
+      setState({
+        properties: manualProperties,
+        preferences: preferencesResult.preferences,
+        engine,
+        message: null,
+        geoEvidenceCount: countUsableGeoEvidence(cachedGeoEvidence),
+      });
+      void refreshGeoEvidenceForProperties(manualProperties, preferencesResult.preferences, (propertyId, evidence) => {
+        if (geoController.signal.aborted) return;
+        latestGeoEvidence = { ...latestGeoEvidence, [propertyId]: evidence };
+        const progressivelyUpdatedEngine = runDecisionEngine({
+          properties: manualProperties,
+          preferences: preferencesResult.preferences,
+          asOfDate,
+          geoEvidenceByProperty: latestGeoEvidence,
+        });
+        setState({
+          properties: manualProperties,
+          preferences: preferencesResult.preferences,
+          engine: progressivelyUpdatedEngine,
+          message: null,
+          geoEvidenceCount: countUsableGeoEvidence(latestGeoEvidence),
+        });
+      })
+        .then((geoEvidenceByProperty) => {
+          if (geoController.signal.aborted) return;
+          const engineWithGeoEvidence = runDecisionEngine({
+            properties: manualProperties,
+            preferences: preferencesResult.preferences,
+            asOfDate,
+            geoEvidenceByProperty,
+          });
+          setState({
+            properties: manualProperties,
+            preferences: preferencesResult.preferences,
+            engine: engineWithGeoEvidence,
+            message: null,
+            geoEvidenceCount: countUsableGeoEvidence(geoEvidenceByProperty),
+          });
+        })
+        .catch((error: unknown) => {
+          if (!(error instanceof Error && error.name === "AbortError")) {
+            // External evidence is optional; the deterministic base result remains visible.
+          }
+        });
     } catch (error) {
-      setState({ properties: manualProperties, preferences: preferencesResult.preferences, engine: null, message: error instanceof Error ? error.message : "无法生成分析结果。" });
+      setState({ properties: manualProperties, preferences: preferencesResult.preferences, engine: null, message: error instanceof Error ? error.message : "无法生成分析结果。", geoEvidenceCount: 0 });
     }
     setIsLoading(false);
   }, []);
@@ -143,7 +209,7 @@ export function DecisionResults() {
   useEffect(() => {
     refresh();
     function handleStorage(event: StorageEvent) {
-      if (event.key === PROPERTY_STORAGE_KEY || event.key === BUYER_PREFERENCES_STORAGE_KEY) refresh();
+      if (event.key === PROPERTY_STORAGE_KEY || event.key === BUYER_PREFERENCES_STORAGE_KEY || event.key === GEO_EVIDENCE_STORAGE_KEY) refresh();
     }
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
@@ -151,6 +217,7 @@ export function DecisionResults() {
 
   useEffect(() => () => {
     intelligenceRequestsRef.current.forEach((controller) => controller.abort());
+    geoRequestRef.current?.abort();
   }, []);
 
   async function generatePropertyIntelligence(property: Property): Promise<void> {
@@ -265,7 +332,7 @@ export function DecisionResults() {
           <Database size={20} className="mt-0.5 shrink-0 text-[#75886d]" />
           <div>
             <p className="font-medium">本次结果仅基于已保存的真实结构化信息</p>
-            <p className="mt-1 text-xs leading-5 text-[#767973]">分析日期 {state.engine.asOfDate} · 引擎 {state.engine.engineVersion} · AI 与外部证据暂未参与本次计算</p>
+            <p className="mt-1 text-xs leading-5 text-[#767973]">分析日期 {state.engine.asOfDate} · 引擎 {state.engine.engineVersion} · {state.geoEvidenceCount > 0 ? `已纳入 ${state.geoEvidenceCount} 项高德地图外部证据` : "AI 与外部证据暂未参与本次计算"}</p>
           </div>
         </div>
         {state.engine.rankingProvisional && <span className="shrink-0 rounded-full bg-[#efe8d9] px-4 py-2 text-xs font-medium text-[#806b3e]">阶段性排序</span>}

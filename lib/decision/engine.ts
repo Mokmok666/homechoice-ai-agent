@@ -55,10 +55,19 @@ function evaluateProperty(
     preferences: input.preferences,
     asOfDate: input.asOfDate,
     weights,
+    geoEvidence: input.geoEvidenceByProperty?.[property.id],
   });
   const overallScore = calculateOverallScore(dimensions);
   const evidenceItems = buildEvidenceItems(decisionProperty, input.preferences);
-  const confidence = calculateConfidence(dimensions, evidenceItems, property, input.preferences, input.asOfDate, invalidInputFields);
+  const confidence = calculateConfidence(
+    dimensions,
+    evidenceItems,
+    property,
+    input.preferences,
+    input.asOfDate,
+    invalidInputFields,
+    input.geoEvidenceByProperty?.[property.id],
+  );
   const recommendation = makeRecommendation({
     property: decisionProperty,
     preferences: input.preferences,
