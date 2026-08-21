@@ -1,7 +1,9 @@
 import type { DimensionKey } from "@/types/decision";
 
 export const WEB_EVIDENCE_VERSION = 1 as const;
-export const WEB_EVIDENCE_PROVIDER_ID = "zhipu-web-search-v2" as const;
+export const WEB_EVIDENCE_PROVIDER_ID = "tavily-search-v1" as const;
+export const WEB_EVIDENCE_LEGACY_PROVIDER_ID = "zhipu-web-search-v2" as const;
+export const WEB_EVIDENCE_INTERPRETATION_VERSION = 2 as const;
 export const WEB_EVIDENCE_TARGET_DIMENSIONS = [
   "location_maturity",
   "community_quality",
@@ -12,6 +14,7 @@ export const WEB_EVIDENCE_TARGET_DIMENSIONS = [
 ] as const satisfies readonly DimensionKey[];
 
 export type WebEvidenceDimensionKey = (typeof WEB_EVIDENCE_TARGET_DIMENSIONS)[number];
+export type WebEvidenceProviderId = typeof WEB_EVIDENCE_PROVIDER_ID | typeof WEB_EVIDENCE_LEGACY_PROVIDER_ID;
 export type WebEvidenceConfidence = "high" | "medium" | "low";
 export type WebEvidenceStatus = "verified" | "partial" | "unavailable";
 export type TransactionEvidenceKind = "transaction" | "listing" | "unknown";
@@ -38,11 +41,18 @@ export interface WebEvidenceFact {
   transactionKind?: TransactionEvidenceKind;
 }
 
+export interface WebEvidenceInterpretation {
+  conclusion: string;
+  supportingFacts: string[];
+  generatedAt: string;
+}
+
 export interface DimensionWebEvidence {
   dimensionKey: WebEvidenceDimensionKey;
   status: WebEvidenceStatus;
   summary?: string;
   facts: WebEvidenceFact[];
+  interpretation?: WebEvidenceInterpretation;
 }
 
 export interface PropertyWebEvidence {
@@ -51,7 +61,9 @@ export interface PropertyWebEvidence {
   dimensions: DimensionWebEvidence[];
   fetchedAt: string;
   version: typeof WEB_EVIDENCE_VERSION;
-  providerId?: typeof WEB_EVIDENCE_PROVIDER_ID;
+  providerId?: WebEvidenceProviderId;
+  interpretationVersion?: typeof WEB_EVIDENCE_INTERPRETATION_VERSION;
+  interpretationSignature?: string;
 }
 
 export interface WebEvidenceByProperty {
@@ -93,3 +105,23 @@ export type WebEvidenceApiErrorCode =
 export type WebEvidenceApiResponse =
   | { ok: true; evidence: PropertyWebEvidence }
   | { ok: false; error: { code: WebEvidenceApiErrorCode; message: string; retryable: boolean } };
+
+export interface WebEvidenceInterpretationRequest {
+  property: WebEvidencePropertyIdentity;
+  evidence: PropertyWebEvidence;
+  interpretationSignature: string;
+}
+
+export type WebEvidenceInterpretationApiResponse =
+  | {
+      ok: true;
+      propertyId: string;
+      interpretationSignature: string;
+      dimensions: Array<{
+        dimensionKey: WebEvidenceDimensionKey;
+        conclusion: string;
+        supportingFacts: string[];
+      }>;
+      metadata: { provider: "zhipu"; model: string; generatedAt: string };
+    }
+  | { ok: false; error: { code: "INVALID_REQUEST" | "INVALID_AI_OUTPUT" | "AI_NOT_CONFIGURED" | "AI_TIMEOUT" | "AI_PROVIDER_ERROR"; message: string; retryable: boolean } };

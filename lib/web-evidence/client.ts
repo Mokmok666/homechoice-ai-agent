@@ -1,9 +1,18 @@
 import { loadCachedPropertyWebEvidence, loadCachedWebEvidenceForProperties, savePropertyWebEvidence } from "@/lib/web-evidence-storage";
 import { projectWebEvidencePropertyIdentity } from "./query-builder";
+import { applyWebEvidenceInterpretation, hasCurrentWebEvidenceInterpretation } from "./interpretation";
+import { createWebEvidenceInterpretationSignature } from "./interpretation-signature";
 import type { Property } from "@/types/property";
-import type { PropertyWebEvidence, WebEvidenceApiResponse, WebEvidenceByProperty } from "./types";
+import {
+  WEB_EVIDENCE_PROVIDER_ID,
+  type PropertyWebEvidence,
+  type WebEvidenceApiResponse,
+  type WebEvidenceByProperty,
+  type WebEvidenceInterpretationApiResponse,
+} from "./types";
 
 const inFlight = new Map<string, Promise<PropertyWebEvidence | null>>();
+const interpretationInFlight = new Map<string, Promise<WebEvidenceInterpretationApiResponse>>();
 const MAX_CONCURRENT_PROPERTY_REFRESHES = 2;
 
 function abortError(): DOMException {
@@ -42,6 +51,23 @@ async function requestEvidence(property: Property, signal?: AbortSignal): Promis
   return waitForSharedRequest(request, signal);
 }
 
+async function requestInterpretation(property: Property, evidence: PropertyWebEvidence, signal?: AbortSignal): Promise<WebEvidenceInterpretationApiResponse> {
+  const identity = projectWebEvidencePropertyIdentity(property);
+  const interpretationSignature = createWebEvidenceInterpretationSignature(evidence);
+  const existing = interpretationInFlight.get(interpretationSignature);
+  if (existing) return waitForSharedRequest(existing, signal);
+  const request = (async () => {
+    const response = await fetch("/api/web-evidence/interpret", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ property: identity, evidence, interpretationSignature }),
+    });
+    return response.json() as Promise<WebEvidenceInterpretationApiResponse>;
+  })().finally(() => interpretationInFlight.delete(interpretationSignature));
+  interpretationInFlight.set(interpretationSignature, request);
+  return waitForSharedRequest(request, signal);
+}
+
 export async function refreshWebEvidenceForProperties(
   properties: Property[],
   onPropertyEvidence?: (propertyId: string, evidence: PropertyWebEvidence) => void,
@@ -54,20 +80,36 @@ export async function refreshWebEvidenceForProperties(
       if (signal?.aborted) throw abortError();
       const property = properties[nextIndex++];
       const cached = loadCachedPropertyWebEvidence(property);
-      if (!cached.stale) continue;
-      try {
-        const evidence = await requestEvidence(property, signal);
+      let evidence = cached.evidence?.providerId === WEB_EVIDENCE_PROVIDER_ID ? cached.evidence : undefined;
+      if (cached.stale) try {
+        const refreshedEvidence = await requestEvidence(property, signal);
         if (signal?.aborted) throw abortError();
-        if (!evidence) continue;
-        const newCoverage = evidence.dimensions.filter((item) => item.status !== "unavailable" && item.facts.length > 0).length;
-        const cachedCoverage = cached.evidence?.dimensions.filter((item) => item.status !== "unavailable" && item.facts.length > 0).length ?? 0;
-        if (newCoverage === 0 && cachedCoverage > 0) continue;
-        if (!savePropertyWebEvidence(property, evidence)) continue;
-        evidenceByProperty[property.id] = evidence;
-        onPropertyEvidence?.(property.id, evidence);
+        if (refreshedEvidence) {
+          const newCoverage = refreshedEvidence.dimensions.filter((item) => item.status !== "unavailable" && item.facts.length > 0).length;
+          const cachedCoverage = cached.evidence?.dimensions.filter((item) => item.status !== "unavailable" && item.facts.length > 0).length ?? 0;
+          if (!(newCoverage === 0 && cachedCoverage > 0)) {
+            if (savePropertyWebEvidence(property, refreshedEvidence)) {
+              evidence = refreshedEvidence;
+              evidenceByProperty[property.id] = refreshedEvidence;
+              onPropertyEvidence?.(property.id, refreshedEvidence);
+            }
+          }
+        }
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") throw error;
         // One property/provider failure must not block other properties or erase valid cache.
+      }
+      if (!evidence || hasCurrentWebEvidenceInterpretation(evidence)) continue;
+      try {
+        const interpretationResponse = await requestInterpretation(property, evidence, signal);
+        if (signal?.aborted) throw abortError();
+        const interpretedEvidence = applyWebEvidenceInterpretation(evidence, interpretationResponse);
+        if (!interpretedEvidence || !savePropertyWebEvidence(property, interpretedEvidence)) continue;
+        evidenceByProperty[property.id] = interpretedEvidence;
+        onPropertyEvidence?.(property.id, interpretedEvidence);
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") throw error;
+        // Deterministic concise summaries remain the safe fallback when interpretation fails.
       }
     }
   }

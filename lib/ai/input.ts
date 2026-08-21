@@ -192,6 +192,8 @@ function projectWebEvidence(evidence: WebEvidenceByProperty[string] | undefined)
     dimensionKey: dimension.dimensionKey,
     status: dimension.status,
     summary: safeText(dimension.summary),
+    interpretationConclusion: safeText(dimension.interpretation?.conclusion),
+    supportingFacts: dimension.interpretation?.supportingFacts.flatMap((fact) => safeText(fact) ? [safeText(fact)!] : []).slice(0, 3) ?? [],
     facts: dimension.facts.flatMap((fact) => {
       const claim = safeText(fact.claim);
       const sourceTitle = safeText(fact.sourceTitle);

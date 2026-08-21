@@ -10,7 +10,7 @@ function mergeDimension(dimension: DimensionEvaluation, propertyEvidence: Proper
   const web = propertyEvidence?.dimensions.find((item) => item.dimensionKey === dimension.key);
   if (!web || web.status === "unavailable" || web.facts.length === 0) return dimension;
   const quality = web.status === "verified" ? 0.85 : 0.6;
-  const descriptions = [web.summary].filter((item): item is string => Boolean(item));
+  const descriptions = [web.interpretation?.conclusion ?? web.summary].filter((item): item is string => Boolean(item));
   return {
     ...dimension,
     // Web facts enrich evidence only. Without an approved scorer, score and all ranking fields remain untouched.

@@ -100,6 +100,8 @@ export interface AIWebDimensionEvidenceContext {
   dimensionKey: DimensionKey;
   status: "verified" | "partial" | "unavailable";
   summary: string | null;
+  interpretationConclusion: string | null;
+  supportingFacts: string[];
   facts: AIWebEvidenceFactContext[];
 }
 export interface AIWebEvidenceContext {

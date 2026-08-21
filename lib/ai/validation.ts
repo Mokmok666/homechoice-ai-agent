@@ -62,7 +62,7 @@ function validateCandidate(value: unknown, index: number, errors: string[]): voi
       errors.push(`candidates[${index}].webEvidence is invalid`);
     } else {
       value.webEvidence.dimensions.forEach((dimension, evidenceIndex) => {
-        if (!isRecord(dimension) || !WEB_EVIDENCE_TARGET_DIMENSIONS.includes(dimension.dimensionKey as never) || !["verified", "partial", "unavailable"].includes(String(dimension.status)) || !(dimension.summary === null || typeof dimension.summary === "string") || !Array.isArray(dimension.facts)) {
+        if (!isRecord(dimension) || !WEB_EVIDENCE_TARGET_DIMENSIONS.includes(dimension.dimensionKey as never) || !["verified", "partial", "unavailable"].includes(String(dimension.status)) || !(dimension.summary === null || typeof dimension.summary === "string") || !(dimension.interpretationConclusion === null || typeof dimension.interpretationConclusion === "string") || !isStringArray(dimension.supportingFacts) || !Array.isArray(dimension.facts)) {
           errors.push(`candidates[${index}].webEvidence.dimensions[${evidenceIndex}] is invalid`);
           return;
         }

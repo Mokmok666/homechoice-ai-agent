@@ -1,13 +1,17 @@
 import { createPropertyIdentitySignature, projectWebEvidencePropertyIdentity } from "@/lib/web-evidence/query-builder";
 import { buildDimensionWebEvidenceSummary } from "@/lib/web-evidence/normalize";
+import { createWebEvidenceInterpretationSignature } from "@/lib/web-evidence/interpretation-signature";
 import {
+  WEB_EVIDENCE_INTERPRETATION_VERSION,
   WEB_EVIDENCE_TARGET_DIMENSIONS,
+  WEB_EVIDENCE_LEGACY_PROVIDER_ID,
   WEB_EVIDENCE_PROVIDER_ID,
   WEB_EVIDENCE_VERSION,
   type DimensionWebEvidence,
   type PropertyWebEvidence,
   type WebEvidenceByProperty,
   type WebEvidenceFact,
+  type WebEvidenceInterpretation,
 } from "@/lib/web-evidence/types";
 import type { Property } from "@/types/property";
 
@@ -37,31 +41,48 @@ function parseFact(value: unknown): WebEvidenceFact | null {
   };
 }
 
+function parseInterpretation(value: unknown): WebEvidenceInterpretation | null {
+  if (!isRecord(value) || typeof value.conclusion !== "string" || !value.conclusion.trim() || value.conclusion.length > 100 || !Array.isArray(value.supportingFacts) || value.supportingFacts.length > 3 || !value.supportingFacts.every((item) => typeof item === "string") || typeof value.generatedAt !== "string") return null;
+  return { conclusion: value.conclusion.trim(), supportingFacts: value.supportingFacts.map((item) => item.trim()), generatedAt: value.generatedAt };
+}
+
 function parseDimension(value: unknown): DimensionWebEvidence | null {
   if (!isRecord(value) || !WEB_EVIDENCE_TARGET_DIMENSIONS.includes(value.dimensionKey as never) || !["verified", "partial", "unavailable"].includes(String(value.status)) || !Array.isArray(value.facts)) return null;
   const facts = value.facts.map(parseFact).filter((fact): fact is WebEvidenceFact => fact !== null);
   const dimensionKey = value.dimensionKey as DimensionWebEvidence["dimensionKey"];
   const status = value.status as DimensionWebEvidence["status"];
+  const interpretation = parseInterpretation(value.interpretation);
   return {
     dimensionKey,
     status,
     // Rebuild the concise presentation summary so legacy verbose/generic cache remains readable.
     summary: buildDimensionWebEvidenceSummary(dimensionKey, status, facts),
     facts,
+    ...(interpretation ? { interpretation } : {}),
   };
 }
 
 function parseEvidence(value: unknown): PropertyWebEvidence | null {
   if (!isRecord(value) || value.version !== WEB_EVIDENCE_VERSION || typeof value.propertyId !== "string" || typeof value.propertyIdentitySignature !== "string" || typeof value.fetchedAt !== "string" || !Array.isArray(value.dimensions)) return null;
   const dimensions = value.dimensions.map(parseDimension).filter((item): item is DimensionWebEvidence => item !== null);
-  return dimensions.length === WEB_EVIDENCE_TARGET_DIMENSIONS.length ? {
+  if (dimensions.length !== WEB_EVIDENCE_TARGET_DIMENSIONS.length) return null;
+  const baseEvidence: PropertyWebEvidence = {
     propertyId: value.propertyId,
     propertyIdentitySignature: value.propertyIdentitySignature,
     dimensions,
     fetchedAt: value.fetchedAt,
     version: WEB_EVIDENCE_VERSION,
-    ...(value.providerId === WEB_EVIDENCE_PROVIDER_ID ? { providerId: WEB_EVIDENCE_PROVIDER_ID } : {}),
-  } : null;
+    ...([WEB_EVIDENCE_PROVIDER_ID, WEB_EVIDENCE_LEGACY_PROVIDER_ID].includes(value.providerId as never)
+      ? { providerId: value.providerId as PropertyWebEvidence["providerId"] }
+      : {}),
+  };
+  const hasValidInterpretation = value.interpretationVersion === WEB_EVIDENCE_INTERPRETATION_VERSION
+    && typeof value.interpretationSignature === "string"
+    && value.interpretationSignature === createWebEvidenceInterpretationSignature(baseEvidence);
+  if (hasValidInterpretation) {
+    return { ...baseEvidence, interpretationVersion: WEB_EVIDENCE_INTERPRETATION_VERSION, interpretationSignature: value.interpretationSignature as string };
+  }
+  return { ...baseEvidence, dimensions: baseEvidence.dimensions.map(({ interpretation: _interpretation, ...dimension }) => dimension) };
 }
 
 function readEnvelope(): WebEvidenceEnvelope {
@@ -88,7 +109,7 @@ export function loadCachedPropertyWebEvidence(property: Property, nowMs = Date.n
 export function loadCachedWebEvidenceForProperties(properties: Property[], nowMs = Date.now()): WebEvidenceByProperty {
   return Object.fromEntries(properties.flatMap((property) => {
     const cached = loadCachedPropertyWebEvidence(property, nowMs).evidence;
-    return cached?.providerId === WEB_EVIDENCE_PROVIDER_ID ? [[property.id, cached] as const] : [];
+    return cached ? [[property.id, cached] as const] : [];
   }));
 }
 
