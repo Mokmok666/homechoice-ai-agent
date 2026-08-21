@@ -52,6 +52,14 @@ export function LocationConfirmation({
   const [districtOpen, setDistrictOpen] = useState(false);
 
   useEffect(() => {
+    if (city && cityQuery !== city) setCityQuery(city);
+  }, [city, cityQuery]);
+
+  useEffect(() => {
+    if (district && districtQuery !== district) setDistrictQuery(district);
+  }, [district, districtQuery]);
+
+  useEffect(() => {
     const query = cityQuery.trim();
     if (!query || query === city) { setCities([]); return; }
     const controller = new AbortController();
@@ -150,7 +158,11 @@ export function LocationConfirmation({
           <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-[#8a8d87]" />
           <Input id="city-search" className="pl-10" value={cityQuery} onChange={(event) => {
             setCityQuery(event.target.value);
-            if (event.target.value !== city) { onCityChange(""); onConfirm(null); }
+            if (event.target.value !== city) {
+              setDistrictQuery("");
+              onCityChange("");
+              onConfirm(null);
+            }
           }} placeholder="搜索城市，例如杭州、成都" aria-invalid={Boolean(errors.city)} />
           {cityLoading && <Loader2 size={16} className="absolute right-4 top-1/2 -translate-y-1/2 animate-spin text-[#7d8f75]" />}
         </div>

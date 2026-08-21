@@ -221,10 +221,12 @@ export function PropertyForm() {
     }
     setEditingId(id);
     setConfirmedLocation(property.confirmedLocation ?? null);
+    const rehydratedCity = property.city.trim() || property.confirmedLocation?.city?.trim() || "";
+    const rehydratedDistrict = property.district.trim() || property.confirmedLocation?.district?.trim() || "";
     setForm({
       name: property.name,
-      city: property.city,
-      district: property.district,
+      city: rehydratedCity,
+      district: rehydratedDistrict,
       address: property.confirmedLocation?.name ?? property.address,
       totalPrice: String(property.totalPrice),
       area: String(property.area),
@@ -271,7 +273,20 @@ export function PropertyForm() {
   function handleLocationConfirmation(location: ConfirmedPropertyLocation | null) {
     setConfirmedLocation(location);
     if (location) {
-      setForm((current) => ({ ...current, name: location.name }));
+      setForm((current) => ({
+        ...current,
+        name: location.name,
+        city: location.city,
+        district: location.district,
+        address: location.formattedAddress,
+      }));
+      setErrors((current) => ({
+        ...current,
+        city: undefined,
+        district: undefined,
+        address: undefined,
+        form: undefined,
+      }));
     } else if (!editingId) {
       setForm((current) => ({ ...current, name: "" }));
     }
@@ -309,8 +324,8 @@ export function PropertyForm() {
     const resolvedName = confirmedLocation?.name ?? (form.name.trim() || form.address.trim());
     const input: PropertyInput = {
       name: resolvedName,
-      city: form.city.trim(),
-      district: form.district.trim(),
+      city: confirmedLocation?.city ?? form.city.trim(),
+      district: confirmedLocation?.district ?? form.district.trim(),
       address: confirmedLocation?.formattedAddress ?? form.address.trim(),
       totalPrice: Number(form.totalPrice),
       area: Number(form.area),

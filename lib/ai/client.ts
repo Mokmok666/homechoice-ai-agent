@@ -20,7 +20,11 @@ async function performAIAnalysisRequest(
     });
 
     const payload: unknown = await response.json();
-    const validation = validateAIAnalysisResponse(payload);
+    const validation = validateAIAnalysisResponse(
+      payload,
+      request.context.authoritativeTopPropertyId,
+      request.context.candidates[0]?.property.name ?? undefined,
+    );
     if (!validation.success) {
       return {
         ok: false,

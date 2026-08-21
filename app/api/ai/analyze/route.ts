@@ -70,7 +70,11 @@ export async function POST(request: Request): Promise<NextResponse<AIAnalysisRes
         inputSignature: requestValidation.data.inputSignature,
       },
     };
-    const responseValidation = validateAIAnalysisResponse(candidate);
+    const responseValidation = validateAIAnalysisResponse(
+      candidate,
+      requestValidation.data.context.authoritativeTopPropertyId,
+      requestValidation.data.context.candidates[0]?.property.name ?? undefined,
+    );
     if (!responseValidation.success || !responseValidation.data.ok) {
       return errorResponse("INVALID_AI_OUTPUT", "AI 返回内容未通过安全校验。", false);
     }

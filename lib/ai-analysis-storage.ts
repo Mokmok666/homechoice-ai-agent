@@ -44,7 +44,7 @@ function isValidRecord(value: unknown): value is StoredAIAnalysisRecord {
       provider: "zhipu",
       model: "cached-analysis",
     },
-  }).success;
+  }, record.propertyId).success;
 }
 
 export function loadAIAnalysisRecords(): StoredAIAnalysisRecord[] {

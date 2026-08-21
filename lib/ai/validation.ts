@@ -1,190 +1,94 @@
-import {
-  AI_ANALYSIS_SCHEMA_VERSION,
-  type AIAnalysisRequest,
-  type AIAnalysisResponse,
-} from "../../types/ai-analysis";
-import {
-  COMMUTE_MODES,
-  DECISION_PRIORITIES,
-  EDUCATION_NEEDS,
-  EDUCATION_STAGES,
-  PURCHASE_PURPOSES,
-} from "../../types/buyer-preferences";
+import { AI_ANALYSIS_SCHEMA_VERSION, type AIAnalysisRequest, type AIAnalysisResponse } from "../../types/ai-analysis";
+import { DECISION_PRIORITIES, EDUCATION_NEEDS, EDUCATION_STAGES, PURCHASE_PURPOSES, SELECTABLE_COMMUTE_MODES } from "../../types/buyer-preferences";
 import { DIMENSION_KEYS } from "../../types/decision";
+import { WEB_EVIDENCE_TARGET_DIMENSIONS } from "../web-evidence/types";
 
-export type ValidationResult<T> =
-  | { success: true; data: T }
-  | { success: false; errors: string[] };
-
+export type ValidationResult<T> = { success: true; data: T } | { success: false; errors: string[] };
 const RECOMMENDATIONS = ["CONSIDER", "WAIT", "PASS"] as const;
 const DIMENSION_STATUSES = ["known", "partial", "unknown"] as const;
 const CONFIDENCE_LEVELS = ["provisional", "supported"] as const;
-const INSIGHT_KEYS = [
-  "commercial_amenities",
-  "daily_life_amenities",
-  "community_quality",
-  "liquidity",
-  "value_preservation",
-] as const;
-const ERROR_CODES = [
-  "INVALID_REQUEST",
-  "AI_NOT_CONFIGURED",
-  "AI_TIMEOUT",
-  "AI_PROVIDER_ERROR",
-  "INVALID_AI_OUTPUT",
-] as const;
-const FORBIDDEN_ANALYSIS_KEYS = new Set([
-  "score",
-  "matchscore",
-  "overallscore",
-  "ranking",
-  "recommendation",
-  "weight",
-  "weights",
-]);
+const ERROR_CODES = ["INVALID_REQUEST", "AI_NOT_CONFIGURED", "AI_TIMEOUT", "AI_PROVIDER_ERROR", "INVALID_AI_OUTPUT"] as const;
+const FORBIDDEN_ANALYSIS_KEYS = new Set(["score", "matchscore", "overallscore", "ranking", "recommendation", "weight", "weights"]);
+const INTERNAL_PRODUCT_LANGUAGE = /Top1|Top2|Decision Engine|排名第一|综合评分模型|AI判断|决策引擎认为|根据模型|当前确定性排序/i;
+const INTERNAL_PENDING_LANGUAGE = /结构化事实|外部证据进行AI分析|未来结合.*AI分析/;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0;
-}
-
-function isNullableString(value: unknown): value is string | null {
-  return value === null || typeof value === "string";
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-function isNullableFiniteNumber(value: unknown): value is number | null {
-  return value === null || isFiniteNumber(value);
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
-
-function isOneOf<T extends readonly string[]>(value: unknown, values: T): value is T[number] {
-  return typeof value === "string" && (values as readonly string[]).includes(value);
-}
-
+function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function isNonEmptyString(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0; }
+function isFiniteNumber(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value); }
+function isNullableNumber(value: unknown): boolean { return value === null || isFiniteNumber(value); }
+function isStringArray(value: unknown): value is string[] { return Array.isArray(value) && value.every((item) => typeof item === "string"); }
+function isOneOf<T extends readonly string[]>(value: unknown, values: T): value is T[number] { return typeof value === "string" && (values as readonly string[]).includes(value); }
+function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean { return Object.keys(value).every((key) => keys.includes(key)); }
 function hasForbiddenAnalysisKey(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasForbiddenAnalysisKey);
   if (!isRecord(value)) return false;
-  return Object.entries(value).some(
-    ([key, child]) => FORBIDDEN_ANALYSIS_KEYS.has(key.toLowerCase()) || hasForbiddenAnalysisKey(child),
-  );
+  return Object.entries(value).some(([key, child]) => FORBIDDEN_ANALYSIS_KEYS.has(key.toLowerCase()) || hasForbiddenAnalysisKey(child));
 }
 
-function validateContext(context: unknown, errors: string[]): void {
-  if (!isRecord(context)) {
-    errors.push("context must be an object");
-    return;
+function validatePreferences(value: unknown, errors: string[]): void {
+  if (!isRecord(value)) { errors.push("context.preferences must be an object"); return; }
+  if (!isOneOf(value.purchasePurpose, PURCHASE_PURPOSES)) errors.push("purchasePurpose is invalid");
+  if (!isFiniteNumber(value.maximumBudget) || value.maximumBudget <= 0) errors.push("maximumBudget must be positive");
+  if (!Array.isArray(value.topPriorities) || value.topPriorities.length !== 3 || !value.topPriorities.every((item) => isOneOf(item, DECISION_PRIORITIES))) errors.push("topPriorities is invalid");
+  if (!isOneOf(value.educationNeed, EDUCATION_NEEDS)) errors.push("educationNeed is invalid");
+  if (!Array.isArray(value.educationStages) || !value.educationStages.every((item) => isOneOf(item, EDUCATION_STAGES))) errors.push("educationStages is invalid");
+  for (const key of ["primaryWorkplace", "partnerWorkplace"] as const) {
+    const workplace = value[key];
+    if (key === "partnerWorkplace" && workplace === null) continue;
+    if (!isRecord(workplace) || !(workplace.label === null || typeof workplace.label === "string") || typeof workplace.confirmed !== "boolean" || !isOneOf(workplace.commuteMode, SELECTABLE_COMMUTE_MODES) || !isNullableNumber(workplace.idealCommuteMinutes) || !isNullableNumber(workplace.maxCommuteMinutes)) {
+      errors.push(`${key} is invalid`);
+    }
   }
+}
 
-  if (!isNonEmptyString(context.asOfDate) || !/^\d{4}-\d{2}-\d{2}$/.test(context.asOfDate)) {
-    errors.push("context.asOfDate must use YYYY-MM-DD");
-  }
-
-  const property = context.property;
-  if (!isRecord(property)) {
-    errors.push("context.property must be an object");
+function validateCandidate(value: unknown, index: number, errors: string[]): void {
+  if (!isRecord(value) || !isRecord(value.property) || !isRecord(value.decision)) { errors.push(`candidates[${index}] is invalid`); return; }
+  const property = value.property;
+  const decision = value.decision;
+  if (!isNonEmptyString(property.propertyId) || !isFiniteNumber(property.expectedTransactionPrice) || property.expectedTransactionPrice <= 0 || !isFiniteNumber(property.area) || property.area <= 0 || !isFiniteNumber(property.budgetDifference)) errors.push(`candidates[${index}].property is invalid`);
+  if (!isNonEmptyString(decision.propertyId) || decision.propertyId !== property.propertyId || !Number.isInteger(decision.rank) || (decision.rank as number) !== index + 1 || !isNullableNumber(decision.matchScore) || !isOneOf(decision.recommendation, RECOMMENDATIONS) || !isOneOf(decision.analysisConfidence, CONFIDENCE_LEVELS) || typeof decision.provisional !== "boolean" || !isFiniteNumber(decision.dataCompletenessPercent)) errors.push(`candidates[${index}].decision is invalid`);
+  if (!Array.isArray(decision.dimensions) || decision.dimensions.length !== DIMENSION_KEYS.length) {
+    errors.push(`candidates[${index}].dimensions must contain all 15 dimensions`);
   } else {
-    if (!isNonEmptyString(property.propertyId)) errors.push("propertyId is required");
-    if (!isNullableString(property.name)) errors.push("property.name must be a string or null");
-    if (!isFiniteNumber(property.expectedTransactionPrice) || property.expectedTransactionPrice <= 0) {
-      errors.push("property.expectedTransactionPrice must be positive");
-    }
-    if (!isFiniteNumber(property.area) || property.area <= 0) errors.push("property.area must be positive");
-    if (!isNullableFiniteNumber(property.listingPrice)) errors.push("property.listingPrice is invalid");
-    if (!isNullableFiniteNumber(property.deliveryYear)) errors.push("property.deliveryYear is invalid");
-    if (!isNullableFiniteNumber(property.metroDistance)) errors.push("property.metroDistance is invalid");
-    if (!isRecord(property.location)) {
-      errors.push("property.location must be an object");
-    } else if (
-      !isNullableString(property.location.city) ||
-      !isNullableString(property.location.district) ||
-      !isNullableString(property.location.address)
-    ) {
-      errors.push("property.location contains invalid fields");
-    }
-    if (!Array.isArray(property.comparableTransactions)) {
-      errors.push("property.comparableTransactions must be an array");
+    const keys = decision.dimensions.map((item) => isRecord(item) ? item.key : null);
+    if (!DIMENSION_KEYS.every((key) => keys.includes(key))) errors.push(`candidates[${index}].dimensions are incomplete`);
+    decision.dimensions.forEach((dimension, dimensionIndex) => {
+      if (!isRecord(dimension) || !isOneOf(dimension.key, DIMENSION_KEYS) || !isNonEmptyString(dimension.label) || !isNullableNumber(dimension.score) || !isOneOf(dimension.status, DIMENSION_STATUSES) || !isFiniteNumber(dimension.finalWeight) || !Array.isArray(dimension.evidence) || !isStringArray(dimension.missingInputs)) errors.push(`candidates[${index}].dimensions[${dimensionIndex}] is invalid`);
+    });
+  }
+  if (!(value.geoEvidence === null || isRecord(value.geoEvidence))) errors.push(`candidates[${index}].geoEvidence is invalid`);
+  if (value.webEvidence !== null) {
+    if (!isRecord(value.webEvidence) || typeof value.webEvidence.fetchedAt !== "string" || !Array.isArray(value.webEvidence.dimensions)) {
+      errors.push(`candidates[${index}].webEvidence is invalid`);
     } else {
-      property.comparableTransactions.forEach((item, index) => {
-        if (
-          !isRecord(item) ||
-          !isFiniteNumber(item.price) ||
-          item.price <= 0 ||
-          !isFiniteNumber(item.area) ||
-          item.area <= 0 ||
-          !isNonEmptyString(item.transactionDate) ||
-          !isNonEmptyString(item.source)
-        ) {
-          errors.push(`property.comparableTransactions[${index}] is invalid`);
+      value.webEvidence.dimensions.forEach((dimension, evidenceIndex) => {
+        if (!isRecord(dimension) || !WEB_EVIDENCE_TARGET_DIMENSIONS.includes(dimension.dimensionKey as never) || !["verified", "partial", "unavailable"].includes(String(dimension.status)) || !(dimension.summary === null || typeof dimension.summary === "string") || !Array.isArray(dimension.facts)) {
+          errors.push(`candidates[${index}].webEvidence.dimensions[${evidenceIndex}] is invalid`);
+          return;
         }
+        dimension.facts.forEach((fact, factIndex) => {
+          if (!isRecord(fact) || !isNonEmptyString(fact.claim) || !isNonEmptyString(fact.sourceTitle) || !(fact.sourceDomain === null || typeof fact.sourceDomain === "string") || !["high", "medium", "low"].includes(String(fact.confidence)) || !(fact.transactionKind === null || ["transaction", "listing", "unknown"].includes(String(fact.transactionKind)))) {
+            errors.push(`candidates[${index}].webEvidence.dimensions[${evidenceIndex}].facts[${factIndex}] is invalid`);
+          }
+        });
       });
     }
   }
+}
 
-  const preferences = context.preferences;
-  if (!isRecord(preferences)) {
-    errors.push("context.preferences must be an object");
-  } else {
-    if (!isOneOf(preferences.purchasePurpose, PURCHASE_PURPOSES)) errors.push("purchasePurpose is invalid");
-    if (!isFiniteNumber(preferences.maximumBudget) || preferences.maximumBudget <= 0) {
-      errors.push("maximumBudget must be positive");
-    }
-    if (!isOneOf(preferences.commuteMode, COMMUTE_MODES)) errors.push("commuteMode is invalid");
-    if (!isOneOf(preferences.educationNeed, EDUCATION_NEEDS)) errors.push("educationNeed is invalid");
-    if (
-      !Array.isArray(preferences.educationStages) ||
-      !preferences.educationStages.every((item) => isOneOf(item, EDUCATION_STAGES))
-    ) {
-      errors.push("educationStages is invalid");
-    }
-    if (
-      !Array.isArray(preferences.topPriorities) ||
-      !preferences.topPriorities.every((item) => isOneOf(item, DECISION_PRIORITIES))
-    ) {
-      errors.push("topPriorities is invalid");
-    }
-  }
-
-  const decision = context.decision;
-  if (!isRecord(decision)) {
-    errors.push("context.decision must be an object");
-  } else {
-    if (!isNonEmptyString(decision.decisionVersion)) errors.push("decisionVersion is required");
-    if (!isNonEmptyString(decision.propertyId)) errors.push("decision.propertyId is required");
-    if (!isNullableFiniteNumber(decision.matchScore)) errors.push("decision.matchScore is invalid");
-    if (!isOneOf(decision.recommendation, RECOMMENDATIONS)) errors.push("recommendation is invalid");
-    if (typeof decision.provisional !== "boolean") errors.push("decision.provisional must be boolean");
-    if (!isOneOf(decision.analysisConfidence, CONFIDENCE_LEVELS)) errors.push("analysisConfidence is invalid");
-    if (!isFiniteNumber(decision.dataCompletenessPercent)) errors.push("dataCompletenessPercent is invalid");
-    if (!isStringArray(decision.reasons) || !isStringArray(decision.decisionFactors)) {
-      errors.push("decision reasons or factors are invalid");
-    }
-    if (!Array.isArray(decision.dimensions)) {
-      errors.push("decision.dimensions must be an array");
-    } else {
-      decision.dimensions.forEach((item, index) => {
-        if (
-          !isRecord(item) ||
-          !isOneOf(item.key, DIMENSION_KEYS) ||
-          !isNullableFiniteNumber(item.score) ||
-          !isOneOf(item.status, DIMENSION_STATUSES) ||
-          !isFiniteNumber(item.finalWeight) ||
-          !isStringArray(item.evidence) ||
-          !isStringArray(item.missingInputs)
-        ) {
-          errors.push(`decision.dimensions[${index}] is invalid`);
-        }
-      });
-    }
+function validateContext(value: unknown, errors: string[]): void {
+  if (!isRecord(value)) { errors.push("context must be an object"); return; }
+  if (!isNonEmptyString(value.asOfDate) || !/^\d{4}-\d{2}-\d{2}$/.test(value.asOfDate)) errors.push("asOfDate is invalid");
+  if (!isNonEmptyString(value.decisionVersion) || !isNonEmptyString(value.authoritativeTopPropertyId)) errors.push("decision identity is invalid");
+  const ranking = Array.isArray(value.ranking) && value.ranking.every(isNonEmptyString) ? value.ranking : null;
+  if (!ranking || ranking.length === 0 || ranking[0] !== value.authoritativeTopPropertyId) errors.push("ranking is invalid");
+  if (typeof value.rankingProvisional !== "boolean") errors.push("rankingProvisional is invalid");
+  validatePreferences(value.preferences, errors);
+  if (!Array.isArray(value.candidates) || value.candidates.length !== (ranking?.length ?? -1)) errors.push("candidates must match ranking");
+  else {
+    value.candidates.forEach((candidate, index) => validateCandidate(candidate, index, errors));
+    const candidateIds = value.candidates.map((candidate) => isRecord(candidate) && isRecord(candidate.property) ? candidate.property.propertyId : null);
+    if (!ranking?.every((id, index) => candidateIds[index] === id)) errors.push("candidate order must equal deterministic ranking");
   }
 }
 
@@ -195,85 +99,47 @@ export function validateAIAnalysisRequest(value: unknown): ValidationResult<AIAn
   if (value.locale !== "zh-CN") errors.push("locale must be zh-CN");
   if (!isNonEmptyString(value.inputSignature)) errors.push("inputSignature is required");
   validateContext(value.context, errors);
-  return errors.length === 0
-    ? { success: true, data: value as unknown as AIAnalysisRequest }
-    : { success: false, errors };
+  return errors.length ? { success: false, errors } : { success: true, data: value as unknown as AIAnalysisRequest };
 }
 
-function validateAnalysis(analysis: unknown, errors: string[]): void {
-  if (!isRecord(analysis)) {
-    errors.push("analysis must be an object");
-    return;
-  }
-  if (hasForbiddenAnalysisKey(analysis)) {
-    errors.push("analysis must not contain scores, ranking, recommendation or weights");
-  }
-  if (!isNonEmptyString(analysis.summary)) errors.push("analysis.summary is required");
-  if (
-    !isStringArray(analysis.strengths) ||
-    !isStringArray(analysis.tradeoffs) ||
-    !isStringArray(analysis.confirmationQuestions) ||
-    !isStringArray(analysis.caveats) ||
-    !isNonEmptyString(analysis.disclaimer)
-  ) {
-    errors.push("analysis text collections are invalid");
-  }
-  if (!Array.isArray(analysis.dimensionInsights)) {
-    errors.push("analysis.dimensionInsights must be an array");
+function validateAnalysis(
+  analysis: unknown,
+  errors: string[],
+  expectedTopPropertyId?: string,
+  expectedTopPropertyName?: string,
+): void {
+  if (!isRecord(analysis)) { errors.push("analysis must be an object"); return; }
+  if (!hasOnlyKeys(analysis, ["topPropertyId", "topPropertyName", "decisionSummary", "pendingEvidence", "disclaimer"])) errors.push("analysis contains unexpected fields");
+  if (hasForbiddenAnalysisKey(analysis)) errors.push("analysis must not contain scores, ranking, recommendation or weights");
+  if (!isNonEmptyString(analysis.topPropertyId) || (expectedTopPropertyId && analysis.topPropertyId !== expectedTopPropertyId)) errors.push("analysis.topPropertyId must equal deterministic Top1");
+  if (!isNonEmptyString(analysis.topPropertyName) || (expectedTopPropertyName && analysis.topPropertyName !== expectedTopPropertyName)) errors.push("analysis.topPropertyName must equal deterministic Top1 name");
+  if (!isNonEmptyString(analysis.decisionSummary) || /[\r\n]/.test(analysis.decisionSummary)) {
+    errors.push("analysis.decisionSummary must be one paragraph");
   } else {
-    analysis.dimensionInsights.forEach((item, index) => {
-      if (
-        !isRecord(item) ||
-        !isOneOf(item.key, INSIGHT_KEYS) ||
-        !isOneOf(item.status, ["analyzed", "insufficient_evidence"] as const) ||
-        !isNonEmptyString(item.insight) ||
-        !isStringArray(item.basis)
-      ) {
-        errors.push(`analysis.dimensionInsights[${index}] is invalid`);
-      }
-    });
+    const sentenceCount = (analysis.decisionSummary.match(/[。！？]/g) ?? []).length;
+    if (sentenceCount < 4 || sentenceCount > 6) errors.push("analysis.decisionSummary must contain approximately 4-5 sentences");
+    if (INTERNAL_PRODUCT_LANGUAGE.test(analysis.decisionSummary)) errors.push("analysis.decisionSummary contains internal product language");
   }
+  if (!isStringArray(analysis.pendingEvidence) || analysis.pendingEvidence.length > 3 || analysis.pendingEvidence.some((item) => INTERNAL_PRODUCT_LANGUAGE.test(item) || INTERNAL_PENDING_LANGUAGE.test(item)) || !isNonEmptyString(analysis.disclaimer)) errors.push("analysis evidence or disclaimer is invalid");
 }
 
-export function validateAIAnalysisResponse(value: unknown): ValidationResult<AIAnalysisResponse> {
+export function validateAIAnalysisResponse(
+  value: unknown,
+  expectedTopPropertyId?: string,
+  expectedTopPropertyName?: string,
+): ValidationResult<AIAnalysisResponse> {
   const errors: string[] = [];
-  if (!isRecord(value) || typeof value.ok !== "boolean") {
-    return { success: false, errors: ["response must contain boolean ok"] };
-  }
-
+  if (!isRecord(value) || typeof value.ok !== "boolean") return { success: false, errors: ["response must contain boolean ok"] };
   if (value.ok) {
-    validateAnalysis(value.analysis, errors);
+    validateAnalysis(value.analysis, errors, expectedTopPropertyId, expectedTopPropertyName);
     const metadata = value.metadata;
-    if (
-      !isRecord(metadata) ||
-      !isNonEmptyString(metadata.generatedAt) ||
-      !isNonEmptyString(metadata.inputSignature) ||
-      metadata.provider !== "zhipu" ||
-      !isNonEmptyString(metadata.model)
-    ) {
-      errors.push("response metadata is invalid");
-    }
+    if (!isRecord(metadata) || !isNonEmptyString(metadata.generatedAt) || !isNonEmptyString(metadata.inputSignature) || metadata.provider !== "zhipu" || !isNonEmptyString(metadata.model)) errors.push("response metadata is invalid");
   } else {
     const error = value.error;
-    if (
-      !isRecord(error) ||
-      !isOneOf(error.code, ERROR_CODES) ||
-      !isNonEmptyString(error.message) ||
-      typeof error.retryable !== "boolean"
-    ) {
-      errors.push("response error is invalid");
-    }
+    if (!isRecord(error) || !isOneOf(error.code, ERROR_CODES) || !isNonEmptyString(error.message) || typeof error.retryable !== "boolean") errors.push("response error is invalid");
   }
-
-  return errors.length === 0
-    ? { success: true, data: value as unknown as AIAnalysisResponse }
-    : { success: false, errors };
+  return errors.length ? { success: false, errors } : { success: true, data: value as unknown as AIAnalysisResponse };
 }
 
-export function isAIAnalysisRequest(value: unknown): value is AIAnalysisRequest {
-  return validateAIAnalysisRequest(value).success;
-}
-
-export function isAIAnalysisResponse(value: unknown): value is AIAnalysisResponse {
-  return validateAIAnalysisResponse(value).success;
-}
+export function isAIAnalysisRequest(value: unknown): value is AIAnalysisRequest { return validateAIAnalysisRequest(value).success; }
+export function isAIAnalysisResponse(value: unknown): value is AIAnalysisResponse { return validateAIAnalysisResponse(value).success; }

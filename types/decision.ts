@@ -29,6 +29,7 @@ export type EvidenceSource =
   | "manual"
   | "confirmed_comparable"
   | "amap"
+  | "web"
   | "derived";
 export type AnalysisConfidence = "provisional" | "supported";
 export type Recommendation = "CONSIDER" | "WAIT" | "PASS";

@@ -260,11 +260,13 @@ export function createProperty(input: PropertyInput): Property {
   }
 
   const timestamp = new Date().toISOString();
+  const confirmedLocation = input.confirmedLocation?.confirmedByUser ? input.confirmedLocation : null;
   const property: Property = {
     ...input,
-    name: input.confirmedLocation?.confirmedByUser
-      ? input.confirmedLocation.name
-      : input.name,
+    name: confirmedLocation?.name ?? input.name,
+    city: confirmedLocation?.city ?? input.city,
+    district: confirmedLocation?.district ?? input.district,
+    address: confirmedLocation?.formattedAddress ?? input.address,
     id: createId(),
     status: "pending_analysis",
     source: "manual",
@@ -281,12 +283,14 @@ export function updateProperty(id: string, input: PropertyInput): Property {
   const existing = properties.find((property) => property.id === id);
   if (!existing) throw new Error("未找到需要更新的房源。");
 
+  const confirmedLocation = input.confirmedLocation?.confirmedByUser ? input.confirmedLocation : null;
   const updated: Property = {
     ...existing,
     ...input,
-    name: input.confirmedLocation?.confirmedByUser
-      ? input.confirmedLocation.name
-      : input.name,
+    name: confirmedLocation?.name ?? input.name,
+    city: confirmedLocation?.city ?? input.city,
+    district: confirmedLocation?.district ?? input.district,
+    address: confirmedLocation?.formattedAddress ?? input.address,
     status: "pending_analysis",
     updatedAt: new Date().toISOString(),
   };

@@ -2,26 +2,28 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowRight, Check, Database, LoaderCircle, RefreshCcw, Save, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, Database, Save } from "lucide-react";
 import { AIAnalysisPanel } from "@/components/ai/ai-analysis-panel";
 import { DecisionPropertyCard } from "@/components/decision/decision-property-card";
-import { PropertyIntelligenceCard } from "@/components/intelligence/property-intelligence-card";
 import { Button } from "@/components/ui/button";
 import { findAIAnalysisBySignature } from "@/lib/ai-analysis-storage";
 import { refreshGeoEvidenceForProperties } from "@/lib/amap/evidence-client";
 import { projectAIAnalysisContext } from "@/lib/ai/input";
-import { validatePropertyIntelligence } from "@/lib/ai/property-intelligence-validation";
 import { createAIInputSignature } from "@/lib/ai/signature";
 import { BUYER_PREFERENCES_STORAGE_KEY, loadBuyerPreferences } from "@/lib/buyer-preferences-storage";
-import { createDecisionPropertyView, validateTextField } from "@/lib/decision/dataQuality";
 import { runDecisionEngine } from "@/lib/decision/engine";
 import { saveDecisionHistory } from "@/lib/decision-history-storage";
 import { GEO_EVIDENCE_STORAGE_KEY, loadCachedGeoEvidenceForProperties } from "@/lib/geo-evidence-storage";
 import { getProperties, PROPERTY_STORAGE_KEY } from "@/lib/property-storage";
+import { WEB_EVIDENCE_STORAGE_KEY, loadCachedWebEvidenceForProperties } from "@/lib/web-evidence-storage";
+import { refreshWebEvidenceForProperties } from "@/lib/web-evidence/client";
+import { externalEvidenceCoverage, externalEvidenceCoverageDetails } from "@/lib/web-evidence/merge";
+import { DIMENSION_LABELS } from "@/lib/decision/dimensions";
 import type { BuyerPreferences } from "@/types/buyer-preferences";
 import type { DecisionEngineResult } from "@/types/decision";
+import type { GeoEvidenceByProperty } from "@/types/geo-evidence";
 import type { Property } from "@/types/property";
-import type { PropertyIntelligence, PropertyIntelligenceRequest } from "@/types/property-intelligence";
+import type { WebEvidenceByProperty } from "@/lib/web-evidence/types";
 
 interface ResultsState {
   properties: Property[];
@@ -29,6 +31,8 @@ interface ResultsState {
   engine: DecisionEngineResult | null;
   message: string | null;
   geoEvidenceCount: number;
+  geoEvidenceByProperty: GeoEvidenceByProperty;
+  webEvidenceByProperty: WebEvidenceByProperty;
 }
 
 const RECOMMENDATION_LABELS = {
@@ -48,83 +52,26 @@ function getAIOverallSummary(
   properties: Property[],
   preferences: BuyerPreferences,
   engine: DecisionEngineResult,
+  geoEvidenceByProperty: GeoEvidenceByProperty,
+  webEvidenceByProperty: WebEvidenceByProperty,
 ): string | null {
-  const propertyById = new Map(properties.map((property) => [property.id, property]));
-  const summaries = engine.results.flatMap((decisionResult) => {
-    const property = propertyById.get(decisionResult.propertyId);
-    if (!property) return [];
-    const context = projectAIAnalysisContext({
-      property,
-      preferences,
-      decisionResult,
-      decisionVersion: engine.engineVersion,
-      asOfDate: engine.asOfDate,
-    });
-    const inputSignature = createAIInputSignature(context);
-    const cached = findAIAnalysisBySignature(property.id, inputSignature, engine.engineVersion);
-    return cached ? [`${property.name}：${cached.analysis.summary}`] : [];
-  });
-  return summaries.length > 0 ? summaries.join("\n") : null;
-}
-
-type IntelligenceState =
-  | { status: "loading" }
-  | { status: "success"; intelligence: PropertyIntelligence }
-  | { status: "error"; message: string };
-
-function createPropertyIntelligenceRequest(
-  property: Property,
-  preferences: BuyerPreferences,
-): PropertyIntelligenceRequest {
-  const safeProperty = createDecisionPropertyView(property);
-  const primaryWorkLocation = validateTextField(preferences.primaryWorkLocation).status === "valid"
-    ? preferences.primaryWorkLocation.trim()
-    : null;
-
-  return {
-    property: {
-      id: property.id,
-      name: property.name,
-      city: safeProperty.city,
-      district: safeProperty.district,
-      address: safeProperty.address,
-      totalPrice: property.totalPrice,
-      listingPrice: property.listingPrice ?? null,
-      area: property.area,
-      layout: safeProperty.layout,
-      floor: property.floor,
-      metroDistance: safeProperty.metroDistance,
-      schoolInformation: safeProperty.schoolInformation.trim() || null,
-      propertyManagementInformation: safeProperty.propertyManagementInformation.trim() || null,
-      deliveryYear: property.deliveryYear ?? null,
-      orientation: property.orientation ?? null,
-    },
-    preferences: {
-      purchasePurpose: preferences.purchasePurpose,
-      maximumBudget: preferences.maximumBudget,
-      commuteMode: preferences.commuteMode,
-      primaryWorkLocation,
-      educationNeed: preferences.educationNeed,
-      topPriorities: preferences.topPriorities,
-    },
-  };
+  if (engine.ranking.length === 0) return null;
+  const context = projectAIAnalysisContext({ properties, preferences, engine, geoEvidenceByProperty, webEvidenceByProperty });
+  const inputSignature = createAIInputSignature(context);
+  const cached = findAIAnalysisBySignature(engine.ranking[0], inputSignature, engine.engineVersion);
+  return cached?.analysis.decisionSummary ?? null;
 }
 
 export function DecisionResults() {
-  const [state, setState] = useState<ResultsState>({ properties: [], preferences: null, engine: null, message: null, geoEvidenceCount: 0 });
+  const [state, setState] = useState<ResultsState>({ properties: [], preferences: null, engine: null, message: null, geoEvidenceCount: 0, geoEvidenceByProperty: {}, webEvidenceByProperty: {} });
   const [isLoading, setIsLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
-  const [intelligenceByProperty, setIntelligenceByProperty] = useState<Record<string, IntelligenceState>>({});
-  const intelligenceRequestsRef = useRef(new Map<string, AbortController>());
   const geoRequestRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(() => {
     geoRequestRef.current?.abort();
     const geoController = new AbortController();
     geoRequestRef.current = geoController;
-    intelligenceRequestsRef.current.forEach((controller) => controller.abort());
-    intelligenceRequestsRef.current.clear();
-    setIntelligenceByProperty({});
     setSaveStatus("idle");
     const manualProperties = getProperties().filter((property) => property.source === "manual");
     const preferencesResult = loadBuyerPreferences();
@@ -135,12 +82,14 @@ export function DecisionResults() {
         engine: null,
         message: preferencesResult.status === "invalid" ? preferencesResult.message : "请先完成并保存购房偏好。",
         geoEvidenceCount: 0,
+        geoEvidenceByProperty: {},
+        webEvidenceByProperty: {},
       });
       setIsLoading(false);
       return;
     }
     if (manualProperties.length === 0) {
-      setState({ properties: [], preferences: preferencesResult.preferences, engine: null, message: "当前没有可用于真实分析的手动录入房源。演示 Mock 房源不会参与真实排序。", geoEvidenceCount: 0 });
+      setState({ properties: [], preferences: preferencesResult.preferences, engine: null, message: "当前没有可用于真实分析的手动录入房源。演示 Mock 房源不会参与真实排序。", geoEvidenceCount: 0, geoEvidenceByProperty: {}, webEvidenceByProperty: {} });
       setIsLoading(false);
       return;
     }
@@ -148,7 +97,9 @@ export function DecisionResults() {
     const asOfDate = new Date().toISOString().slice(0, 10);
     try {
       const cachedGeoEvidence = loadCachedGeoEvidenceForProperties(manualProperties, preferencesResult.preferences);
+      const cachedWebEvidence = loadCachedWebEvidenceForProperties(manualProperties);
       let latestGeoEvidence = { ...cachedGeoEvidence };
+      let latestWebEvidence = { ...cachedWebEvidence };
       const engine = runDecisionEngine({
         properties: manualProperties,
         preferences: preferencesResult.preferences,
@@ -161,6 +112,8 @@ export function DecisionResults() {
         engine,
         message: null,
         geoEvidenceCount: countUsableGeoEvidence(cachedGeoEvidence),
+        geoEvidenceByProperty: cachedGeoEvidence,
+        webEvidenceByProperty: cachedWebEvidence,
       });
       void refreshGeoEvidenceForProperties(manualProperties, preferencesResult.preferences, (propertyId, evidence) => {
         if (geoController.signal.aborted) return;
@@ -177,6 +130,8 @@ export function DecisionResults() {
           engine: progressivelyUpdatedEngine,
           message: null,
           geoEvidenceCount: countUsableGeoEvidence(latestGeoEvidence),
+          geoEvidenceByProperty: latestGeoEvidence,
+          webEvidenceByProperty: latestWebEvidence,
         });
       })
         .then((geoEvidenceByProperty) => {
@@ -193,6 +148,8 @@ export function DecisionResults() {
             engine: engineWithGeoEvidence,
             message: null,
             geoEvidenceCount: countUsableGeoEvidence(geoEvidenceByProperty),
+            geoEvidenceByProperty,
+            webEvidenceByProperty: latestWebEvidence,
           });
         })
         .catch((error: unknown) => {
@@ -200,8 +157,17 @@ export function DecisionResults() {
             // External evidence is optional; the deterministic base result remains visible.
           }
         });
+      void refreshWebEvidenceForProperties(manualProperties, (propertyId, evidence) => {
+        if (geoController.signal.aborted) return;
+        latestWebEvidence = { ...latestWebEvidence, [propertyId]: evidence };
+        setState((current) => ({ ...current, webEvidenceByProperty: latestWebEvidence }));
+      }, geoController.signal).catch((error: unknown) => {
+        if (!(error instanceof Error && error.name === "AbortError")) {
+          // Web evidence is optional; cached and deterministic results remain visible.
+        }
+      });
     } catch (error) {
-      setState({ properties: manualProperties, preferences: preferencesResult.preferences, engine: null, message: error instanceof Error ? error.message : "无法生成分析结果。", geoEvidenceCount: 0 });
+      setState({ properties: manualProperties, preferences: preferencesResult.preferences, engine: null, message: error instanceof Error ? error.message : "无法生成分析结果。", geoEvidenceCount: 0, geoEvidenceByProperty: {}, webEvidenceByProperty: {} });
     }
     setIsLoading(false);
   }, []);
@@ -209,64 +175,13 @@ export function DecisionResults() {
   useEffect(() => {
     refresh();
     function handleStorage(event: StorageEvent) {
-      if (event.key === PROPERTY_STORAGE_KEY || event.key === BUYER_PREFERENCES_STORAGE_KEY || event.key === GEO_EVIDENCE_STORAGE_KEY) refresh();
+      if (event.key === PROPERTY_STORAGE_KEY || event.key === BUYER_PREFERENCES_STORAGE_KEY || event.key === GEO_EVIDENCE_STORAGE_KEY || event.key === WEB_EVIDENCE_STORAGE_KEY) refresh();
     }
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
   }, [refresh]);
 
-  useEffect(() => () => {
-    intelligenceRequestsRef.current.forEach((controller) => controller.abort());
-    geoRequestRef.current?.abort();
-  }, []);
-
-  async function generatePropertyIntelligence(property: Property): Promise<void> {
-    if (!state.preferences || intelligenceRequestsRef.current.has(property.id)) return;
-    const controller = new AbortController();
-    intelligenceRequestsRef.current.set(property.id, controller);
-    setIntelligenceByProperty((current) => ({ ...current, [property.id]: { status: "loading" } }));
-
-    try {
-      const response = await fetch("/api/intelligence/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(createPropertyIntelligenceRequest(property, state.preferences)),
-        signal: controller.signal,
-      });
-      const payload: unknown = await response.json();
-      if (controller.signal.aborted) return;
-      const validation = validatePropertyIntelligence(payload);
-      if (!response.ok || !validation.success || validation.data.propertyId !== property.id) {
-        setIntelligenceByProperty((current) => ({
-          ...current,
-          [property.id]: { status: "error", message: "房产智能分析暂时不可用，请稍后重试。" },
-        }));
-        return;
-      }
-      setIntelligenceByProperty((current) => ({
-        ...current,
-        [property.id]: { status: "success", intelligence: validation.data },
-      }));
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") return;
-      setIntelligenceByProperty((current) => ({
-        ...current,
-        [property.id]: { status: "error", message: "无法连接房产智能分析服务。" },
-      }));
-    } finally {
-      if (intelligenceRequestsRef.current.get(property.id) === controller) {
-        intelligenceRequestsRef.current.delete(property.id);
-      }
-    }
-  }
-
-  function generateAllPropertyIntelligence(): void {
-    state.properties.forEach((property) => {
-      if (intelligenceByProperty[property.id]?.status !== "success") {
-        void generatePropertyIntelligence(property);
-      }
-    });
-  }
+  useEffect(() => () => geoRequestRef.current?.abort(), []);
 
   function handleSaveDecision(): void {
     if (!state.engine || !state.preferences) return;
@@ -281,10 +196,7 @@ export function DecisionResults() {
         preferences: state.preferences,
         decisionResult: state.engine,
         recommendedPropertyId: topResult?.propertyId ?? null,
-        aiOverallSummary: getAIOverallSummary(state.properties, state.preferences, state.engine),
-        propertyIntelligence: Object.values(intelligenceByProperty).flatMap((item) =>
-          item.status === "success" ? [item.intelligence] : []
-        ),
+        aiOverallSummary: getAIOverallSummary(state.properties, state.preferences, state.engine, state.geoEvidenceByProperty, state.webEvidenceByProperty),
       });
       setSaveStatus("saved");
     } catch {
@@ -314,15 +226,23 @@ export function DecisionResults() {
   const winner = state.engine.results[0];
   const winnerProperty = propertyById.get(winner.propertyId);
   const confirmedEvidence = winner.confidence.evidenceItems.filter((item) => item.category === "confirmed");
-  const aiEvidence = winner.confidence.evidenceItems.filter((item) => item.category === "ai_inferred");
   const optionalEvidence = winner.confidence.evidenceItems.filter((item) => item.category === "optional_confirmation");
+  const winnerWebEvidence = state.webEvidenceByProperty[winner.propertyId];
+  const winnerExternalCoverage = externalEvidenceCoverage(winnerWebEvidence);
+  const winnerExternalCoverageDetails = externalEvidenceCoverageDetails(winnerWebEvidence);
+  const externalEvidenceItems = [
+    ...(winnerExternalCoverageDetails.covered.length > 0
+      ? [{ id: "covered", title: `已覆盖：${winnerExternalCoverageDetails.covered.map((key) => DIMENSION_LABELS[key]).join("、")}` }]
+      : []),
+    ...(winnerExternalCoverageDetails.uncovered.length > 0
+      ? [{ id: "uncovered", title: `尚未覆盖：${winnerExternalCoverageDetails.uncovered.map((key) => DIMENSION_LABELS[key]).join("、")}` }]
+      : []),
+  ];
   const completeness = winner.confidence.dataCompleteness;
   const hasInvalidInputs = state.engine.results.some((result) => result.confidence.invalidInputFields.length > 0);
-  const intelligenceStates = Object.values(intelligenceByProperty);
-  const isIntelligenceLoading = intelligenceStates.some((item) => item.status === "loading");
-  const hasIntelligence = intelligenceStates.some((item) => item.status === "success");
-  const hasCompleteIntelligence = state.properties.length > 0 && state.properties.every(
-    (property) => intelligenceByProperty[property.id]?.status === "success",
+  const totalWebEvidenceCoverage = Object.values(state.webEvidenceByProperty).reduce(
+    (sum, evidence) => sum + externalEvidenceCoverage(evidence).completed,
+    0,
   );
 
   return (
@@ -332,7 +252,7 @@ export function DecisionResults() {
           <Database size={20} className="mt-0.5 shrink-0 text-[#75886d]" />
           <div>
             <p className="font-medium">本次结果仅基于已保存的真实结构化信息</p>
-            <p className="mt-1 text-xs leading-5 text-[#767973]">分析日期 {state.engine.asOfDate} · 引擎 {state.engine.engineVersion} · {state.geoEvidenceCount > 0 ? `已纳入 ${state.geoEvidenceCount} 项高德地图外部证据` : "AI 与外部证据暂未参与本次计算"}</p>
+            <p className="mt-1 text-xs leading-5 text-[#767973]">分析日期 {state.engine.asOfDate} · 引擎 {state.engine.engineVersion} · {state.geoEvidenceCount > 0 || totalWebEvidenceCoverage > 0 ? `已纳入 ${state.geoEvidenceCount} 项高德地图证据、${totalWebEvidenceCoverage} 个公开来源维度` : "AI 与外部证据暂未参与本次计算"}</p>
           </div>
         </div>
         {state.engine.rankingProvisional && <span className="shrink-0 rounded-full bg-[#efe8d9] px-4 py-2 text-xs font-medium text-[#806b3e]">阶段性排序</span>}
@@ -341,7 +261,7 @@ export function DecisionResults() {
       <div className="mt-7 grid items-stretch gap-5 md:grid-cols-2 xl:grid-cols-4">
         {state.engine.results.map((result, index) => {
           const property = propertyById.get(result.propertyId);
-          return property ? <DecisionPropertyCard key={result.propertyId} property={property} result={result} rank={index + 1} /> : null;
+          return property ? <DecisionPropertyCard key={result.propertyId} property={property} result={result} rank={index + 1} externalEvidenceCoverage={externalEvidenceCoverage(state.webEvidenceByProperty[result.propertyId])} /> : null;
         })}
       </div>
 
@@ -379,7 +299,7 @@ export function DecisionResults() {
             <div className="mt-4 grid gap-4 lg:grid-cols-3">
               {[
                 { title: "已确认信息", items: confirmedEvidence, style: "bg-[#f5f8f3] text-[#607158]" },
-                { title: `AI分析项（${winner.confidence.aiAnalysisProgress.completed}/${winner.confidence.aiAnalysisProgress.total}）`, items: aiEvidence, style: "bg-[#f7f4ed] text-[#806b3e]" },
+                { title: `外部证据覆盖（${winnerExternalCoverage.completed}/${winnerExternalCoverage.total}）`, items: externalEvidenceItems, style: "bg-[#f7f4ed] text-[#806b3e]" },
                 { title: "可进一步确认", items: optionalEvidence, style: "bg-[#f7f6f2] text-[#626560]" },
               ].map((group) => (
                 <div key={group.title} className={`rounded-xl p-5 ${group.style}`}>
@@ -395,49 +315,6 @@ export function DecisionResults() {
           <Link href={`/results/${winner.propertyId}`} className="mt-6 inline-flex items-center gap-2 text-sm text-[#607158]">查看完整 15 维证据 <ArrowRight size={16} /></Link>
         </section>
       )}
-
-      <section className="mt-7">
-        <div className="card flex flex-col gap-5 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
-          <div>
-            <p className="text-xs uppercase tracking-[0.18em] text-[#75886d]">Property Intelligence</p>
-            <h2 className="mt-2 font-serif text-2xl">房产智能分析</h2>
-            <p className="mt-2 text-sm leading-6 text-[#70736e]">基于已提供房源信息和一般性地理知识，补充区域、产业、生活与资产价值背景。</p>
-          </div>
-          <Button type="button" onClick={generateAllPropertyIntelligence} disabled={isIntelligenceLoading || hasCompleteIntelligence} className="shrink-0">
-            {isIntelligenceLoading ? <LoaderCircle className="animate-spin" size={16} /> : hasIntelligence ? <RefreshCcw size={16} /> : <Sparkles size={16} />}
-            {isIntelligenceLoading
-              ? "正在分析房产价值..."
-              : hasCompleteIntelligence
-                ? "已生成房产智能分析"
-                : hasIntelligence
-                  ? "生成未完成分析"
-                  : "生成房产智能分析"}
-          </Button>
-        </div>
-
-        {intelligenceStates.length === 0 && (
-          <div className="mt-4 rounded-2xl border border-dashed border-[#dcded7] p-6 text-center text-sm text-[#7b7e78]">未生成房产智能分析</div>
-        )}
-
-        <div className="mt-4 space-y-5">
-          {state.properties.map((property) => {
-            const intelligenceState = intelligenceByProperty[property.id];
-            if (!intelligenceState) return null;
-            if (intelligenceState.status === "success") {
-              return <PropertyIntelligenceCard key={property.id} property={property} intelligence={intelligenceState.intelligence} />;
-            }
-            if (intelligenceState.status === "loading") {
-              return <div key={property.id} className="card flex min-h-36 items-center justify-center gap-3 p-6 text-sm text-[#65725f]"><LoaderCircle className="animate-spin" size={20} />正在分析 {property.name} 的房产价值...</div>;
-            }
-            return (
-              <div key={property.id} className="card flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-start gap-3 text-sm text-[#78684a]"><AlertTriangle className="mt-0.5 shrink-0" size={18} /><div><b>{property.name}</b><p className="mt-1">{intelligenceState.message}</p></div></div>
-                <Button type="button" onClick={() => void generatePropertyIntelligence(property)} className="shrink-0 bg-white text-[#53674d] ring-1 ring-[#d8d8d1] hover:bg-[#f3f3ee]"><RefreshCcw size={15} />重新尝试</Button>
-              </div>
-            );
-          })}
-        </div>
-      </section>
 
       <section className="mt-7 flex flex-col gap-4 rounded-2xl border border-[#e3e5de] bg-[#f7f9f5] p-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -456,6 +333,8 @@ export function DecisionResults() {
           properties={state.properties}
           preferences={state.preferences}
           engine={state.engine}
+          geoEvidenceByProperty={state.geoEvidenceByProperty}
+          webEvidenceByProperty={state.webEvidenceByProperty}
         />
       )}
     </>

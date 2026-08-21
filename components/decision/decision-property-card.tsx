@@ -21,10 +21,12 @@ export function DecisionPropertyCard({
   property,
   result,
   rank,
+  externalEvidenceCoverage,
 }: {
   property: Property;
   result: PropertyDecisionResult;
   rank: number;
+  externalEvidenceCoverage: { completed: number; total: number };
 }) {
   const completeness = result.confidence.dataCompleteness;
   return (
@@ -69,7 +71,7 @@ export function DecisionPropertyCard({
 
       <div className="mt-4 space-y-1.5 text-xs leading-5 text-[#747772]">
         <p>✓ 已确认信息 {result.confidence.recordedInputs.length} 项</p>
-        <p>○ AI分析进度 {result.confidence.aiAnalysisProgress.completed} / {result.confidence.aiAnalysisProgress.total}</p>
+        <p>○ 外部证据覆盖 {externalEvidenceCoverage.completed} / {externalEvidenceCoverage.total}</p>
         <p className="flex items-start gap-1.5 text-[#896e42]"><Sparkles size={13} className="mt-1 shrink-0" />可进一步确认 {result.confidence.improvementInputs.length} 项</p>
       </div>
       <span className="mt-auto flex items-center gap-2 pt-5 text-sm text-[#617359]">查看依据与行动建议 <ArrowRight size={15} /></span>
