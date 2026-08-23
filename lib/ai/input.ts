@@ -1,4 +1,5 @@
 import { createDecisionPropertyView, validateTextField } from "../decision/dataQuality";
+import { DIMENSION_LABELS } from "../decision/dimensions";
 import { resolvePartnerCommutePreference, resolvePrimaryCommutePreference } from "../../types/buyer-preferences";
 import type {
   AIAnalysisContext,
@@ -11,7 +12,7 @@ import type {
   AIPropertyContext,
 } from "../../types/ai-analysis";
 import type { BuyerPreferences, ResolvedCommutePreference } from "../../types/buyer-preferences";
-import type { DecisionEngineResult, DimensionKey, PropertyDecisionResult } from "../../types/decision";
+import type { DecisionEngineResult, PropertyDecisionResult } from "../../types/decision";
 import type { CommutePersonEvidence, GeoEvidenceByProperty, PropertyGeoEvidence } from "../../types/geo-evidence";
 import type { Property } from "../../types/property";
 import type { WebEvidenceByProperty } from "../web-evidence/types";
@@ -23,24 +24,6 @@ export interface AIInputProjectorInput {
   geoEvidenceByProperty?: GeoEvidenceByProperty;
   webEvidenceByProperty?: WebEvidenceByProperty;
 }
-
-const DIMENSION_LABELS: Record<DimensionKey, string> = {
-  location_maturity: "地段成熟度",
-  commute: "通勤匹配",
-  public_transport: "轨道交通",
-  commercial_amenities: "商业配套",
-  education: "教育需求",
-  daily_life_amenities: "日常生活便利",
-  layout_design: "户型设计",
-  space_match: "空间匹配",
-  building_age: "楼龄",
-  community_quality: "小区品质",
-  property_management: "物业服务",
-  budget_match: "预算匹配",
-  transaction_price_reasonableness: "成交合理性",
-  liquidity: "流动性",
-  value_preservation: "长期保值",
-};
 
 function safeText(value: string | null | undefined): string | null {
   return validateTextField(value).status === "valid" ? value!.trim() : null;
@@ -71,6 +54,17 @@ function projectProperty(property: Property, maximumBudget: number): AIPropertyC
     deliveryYear: finiteOrNull(property.deliveryYear),
     schoolInformation: safeText(safeProperty.schoolInformation),
     propertyManagementInformation: safeText(safeProperty.propertyManagementInformation),
+    supplementalInformation: {
+      propertyCompany: safeText(property.propertyCompany),
+      propertyFee: finiteOrNull(property.propertyFee),
+      propertyExperience: safeText(property.propertyExperience),
+      environment: safeText(property.environment),
+      noise: safeText(property.noise),
+      parking: safeText(property.parking),
+      publicArea: safeText(property.publicArea),
+      actualCommuteExperience: safeText(property.actualCommuteExperience),
+      recentDealPrice: finiteOrNull(property.recentDealPrice),
+    },
     comparableTransactions: (safeProperty.comparableTransactions ?? [])
       .filter((item) => item.confirmed && item.price > 0 && item.area > 0 && /^\d{4}-\d{2}-\d{2}$/.test(item.transactionDate) && safeText(item.source))
       .map((item) => ({ price: item.price, area: item.area, transactionDate: item.transactionDate, source: item.source.trim() })),
@@ -162,9 +156,14 @@ function projectGeoEvidence(
     quality,
     status,
     publicTransport: evidence.public_transport ? {
-      nearestStationName: evidence.public_transport.nearestStationName,
-      nearestDistanceMeters: evidence.public_transport.nearestDistanceMeters,
-      stationCountWithin1000m: evidence.public_transport.stationCountWithin1000m,
+      nearestStationName: evidence.public_transport.nearestStationName ?? null,
+      nearestDistanceMeters: finiteOrNull(evidence.public_transport.nearestDistanceMeters),
+      stationCountWithin1000m: finiteOrNull(evidence.public_transport.stationCountWithin1000m),
+      busEvidenceAvailable: evidence.public_transport.busEvidenceAvailable === true,
+      nearestBusStopName: evidence.public_transport.nearestBusStopName ?? null,
+      nearestBusStopDistanceMeters: finiteOrNull(evidence.public_transport.nearestBusStopDistanceMeters),
+      busStopCountWithin500m: finiteOrNull(evidence.public_transport.busStopCountWithin500m),
+      busStopCountWithin800m: finiteOrNull(evidence.public_transport.busStopCountWithin800m),
     } : null,
     commercial: evidence.commercial_amenities ? {
       countWithin1000m: evidence.commercial_amenities.countWithin1000m,

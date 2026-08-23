@@ -6,6 +6,7 @@ const MAX_EXAMPLES = 5;
 
 const POI_TYPES = {
   metro: "150500",
+  bus: "150700",
   commercial: "060100|060400",
   supermarket: "060400",
   medical: "090100|090200|090300|090400|090500",
@@ -20,6 +21,7 @@ export interface NearbyCoordinates {
 export interface NearbyPoiResult {
   availability: {
     metro: boolean;
+    bus: boolean;
     commercial: boolean;
     supermarket: boolean;
     medical: boolean;
@@ -32,6 +34,15 @@ export interface NearbyPoiResult {
       location: NearbyCoordinates;
     };
     countWithin1000m: number;
+  };
+  bus: {
+    nearest?: {
+      name: string;
+      distanceMeters: number;
+      location: NearbyCoordinates;
+    };
+    countWithin500m: number;
+    countWithin800m: number;
   };
   commercial: {
     countWithin1000m: number;
@@ -212,6 +223,7 @@ export async function getNearbyPoiEvidence(
 
   const settled = await Promise.allSettled([
     searchNearbyByTypes(coordinates, POI_TYPES.metro, apiKey, AMAP_METRO_SEARCH_RADIUS_METERS),
+    searchNearbyByTypes(coordinates, POI_TYPES.bus, apiKey),
     searchNearbyByTypes(coordinates, POI_TYPES.commercial, apiKey),
     searchNearbyByTypes(coordinates, POI_TYPES.supermarket, apiKey),
     searchNearbyByTypes(coordinates, POI_TYPES.medical, apiKey),
@@ -226,15 +238,17 @@ export async function getNearbyPoiEvidence(
 
   const emptySearch: PoiSearchResult = { count: 0, pois: [] };
   const metroAvailable = settled[0].status === "fulfilled";
-  const commercialAvailable = settled[1].status === "fulfilled";
-  const supermarketAvailable = settled[2].status === "fulfilled";
-  const medicalAvailable = settled[3].status === "fulfilled";
-  const parkAvailable = settled[4].status === "fulfilled";
+  const busAvailable = settled[1].status === "fulfilled";
+  const commercialAvailable = settled[2].status === "fulfilled";
+  const supermarketAvailable = settled[3].status === "fulfilled";
+  const medicalAvailable = settled[4].status === "fulfilled";
+  const parkAvailable = settled[5].status === "fulfilled";
   const metro = settled[0].status === "fulfilled" ? settled[0].value : emptySearch;
-  const commercial = settled[1].status === "fulfilled" ? settled[1].value : emptySearch;
-  const supermarket = settled[2].status === "fulfilled" ? settled[2].value : emptySearch;
-  const medical = settled[3].status === "fulfilled" ? settled[3].value : emptySearch;
-  const park = settled[4].status === "fulfilled" ? settled[4].value : emptySearch;
+  const bus = settled[1].status === "fulfilled" ? settled[1].value : emptySearch;
+  const commercial = settled[2].status === "fulfilled" ? settled[2].value : emptySearch;
+  const supermarket = settled[3].status === "fulfilled" ? settled[3].value : emptySearch;
+  const medical = settled[4].status === "fulfilled" ? settled[4].value : emptySearch;
+  const park = settled[5].status === "fulfilled" ? settled[5].value : emptySearch;
 
   const mainMetroStations = metro.pois.filter((poi) => poi.typecode === "150500");
   const metroCandidates = mainMetroStations.length > 0 ? mainMetroStations : metro.pois;
@@ -242,10 +256,15 @@ export async function getNearbyPoiEvidence(
     .map((poi) => ({ poi, distanceMeters: Math.round(distanceInMeters(coordinates, poi.location)) }));
   const nearestMetro = metroWithDistance
     .sort((left, right) => left.distanceMeters - right.distanceMeters)[0];
+  const busWithDistance = bus.pois
+    .map((poi) => ({ poi, distanceMeters: Math.round(distanceInMeters(coordinates, poi.location)) }))
+    .sort((left, right) => left.distanceMeters - right.distanceMeters);
+  const nearestBus = busWithDistance[0];
 
   return {
     availability: {
       metro: metroAvailable,
+      bus: busAvailable,
       commercial: commercialAvailable,
       supermarket: supermarketAvailable,
       medical: medicalAvailable,
@@ -260,6 +279,11 @@ export async function getNearbyPoiEvidence(
         },
       } : {}),
       countWithin1000m: metroWithDistance.filter((item) => item.distanceMeters <= AMAP_NEARBY_RADIUS_METERS).length,
+    },
+    bus: {
+      ...(nearestBus ? { nearest: { name: nearestBus.poi.name, distanceMeters: nearestBus.distanceMeters, location: nearestBus.poi.location } } : {}),
+      countWithin500m: busWithDistance.filter((item) => item.distanceMeters <= 500).length,
+      countWithin800m: busWithDistance.filter((item) => item.distanceMeters <= 800).length,
     },
     commercial: {
       countWithin1000m: commercial.pois.length,

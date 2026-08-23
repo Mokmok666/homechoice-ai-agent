@@ -13,7 +13,7 @@ import type { AMapRouteMode, CommuteModeResult, CommutePersonEvidence, GeoEviden
 import type { Property } from "@/types/property";
 
 type DailyCategory = "supermarket" | "medical" | "park";
-interface NearbyAvailability { metro: boolean; commercial: boolean; supermarket: boolean; medical: boolean; park: boolean }
+interface NearbyAvailability { metro: boolean; bus: boolean; commercial: boolean; supermarket: boolean; medical: boolean; park: boolean }
 interface NearbyFetchResult { evidence: PropertyGeoEvidence; availability: NearbyAvailability; fetchedAt?: string }
 interface CommuteFetchResult { evidence?: CommutePersonEvidence; fetchedAt?: string; succeeded: boolean }
 
@@ -74,7 +74,7 @@ async function requestWithRetry(url: string, init: RequestInit): Promise<Respons
 }
 async function readJson(response: Response): Promise<unknown> { try { return await response.json() } catch { return null } }
 function emptyNearbyResult(): NearbyFetchResult {
-  return { evidence: {}, availability: { metro: false, commercial: false, supermarket: false, medical: false, park: false } };
+  return { evidence: {}, availability: { metro: false, bus: false, commercial: false, supermarket: false, medical: false, park: false } };
 }
 
 async function fetchNearbyEvidence(property: Property): Promise<NearbyFetchResult> {
@@ -107,24 +107,42 @@ async function fetchNearbyEvidence(property: Property): Promise<NearbyFetchResul
   if (!fetchedAt || !Number.isFinite(Date.parse(fetchedAt)) || !isRecord(nearby.availability)) return emptyNearbyResult();
   const availability: NearbyAvailability = {
     metro: nearby.availability.metro === true, commercial: nearby.availability.commercial === true,
+    bus: nearby.availability.bus === true,
     supermarket: nearby.availability.supermarket === true, medical: nearby.availability.medical === true,
     park: nearby.availability.park === true,
   };
   const status = evidenceStatus(quality);
   const evidence: PropertyGeoEvidence = {};
 
-  if (availability.metro && isRecord(nearby.metro)) {
-    const nearest = nearby.metro.nearest;
-    const stationCount = nearby.metro.countWithin1000m;
-    if (isRecord(nearest) && typeof nearest.name === "string" && nearest.name.trim() && isNonNegativeInteger(nearest.distanceMeters) && isNonNegativeInteger(stationCount)) {
-      evidence.public_transport = {
-        dimension: "public_transport", source: "amap", fetchedAt,
-        status: quality === "low" ? "insufficient" : "partial", quality,
-        observation: `最近地铁主站 ${nearest.name.trim()} 约 ${nearest.distanceMeters} 米（直线距离）`,
-        nearestStationName: nearest.name.trim(), nearestDistanceMeters: nearest.distanceMeters,
-        stationCountWithin1000m: stationCount,
-      };
-    }
+  const metro = availability.metro && isRecord(nearby.metro) ? nearby.metro : null;
+  const metroNearest = metro && isRecord(metro.nearest) && typeof metro.nearest.name === "string" && metro.nearest.name.trim() && isNonNegativeInteger(metro.nearest.distanceMeters)
+    ? metro.nearest : null;
+  const metroNearestName = metroNearest ? String(metroNearest.name).trim() : undefined;
+  const metroNearestDistance = metroNearest ? Number(metroNearest.distanceMeters) : undefined;
+  const metroCount = metro && isNonNegativeInteger(metro.countWithin1000m) ? metro.countWithin1000m : undefined;
+  const bus = availability.bus && isRecord(nearby.bus) ? nearby.bus : null;
+  const busNearest = bus && isRecord(bus.nearest) && typeof bus.nearest.name === "string" && bus.nearest.name.trim() && isNonNegativeInteger(bus.nearest.distanceMeters)
+    ? bus.nearest : null;
+  const busNearestName = busNearest ? String(busNearest.name).trim() : undefined;
+  const busNearestDistance = busNearest ? Number(busNearest.distanceMeters) : undefined;
+  const busCount500 = bus && isNonNegativeInteger(bus.countWithin500m) ? bus.countWithin500m : undefined;
+  const busCount800 = bus && isNonNegativeInteger(bus.countWithin800m) ? bus.countWithin800m : undefined;
+  if ((availability.metro && metroCount !== undefined) || (availability.bus && busCount500 !== undefined && busCount800 !== undefined)) {
+    const observations = [
+      metroNearestName && metroNearestDistance !== undefined ? `最近地铁主站 ${metroNearestName} 约 ${metroNearestDistance} 米（直线距离）` : availability.metro ? "步行范围内未识别到地铁主站" : "地铁证据暂不可用",
+      busNearestName && busNearestDistance !== undefined ? `最近公交站 ${busNearestName} 约 ${busNearestDistance} 米（直线距离），500 米内 ${busCount500} 个、800 米内 ${busCount800} 个公交站` : availability.bus ? "800 米内未识别到公交站" : "公交证据暂不可用",
+    ];
+    evidence.public_transport = {
+      dimension: "public_transport", source: "amap", fetchedAt,
+      status: quality === "low" ? "insufficient" : "partial", quality,
+      observation: observations.join("；"),
+      ...(metroNearestName && metroNearestDistance !== undefined ? { nearestStationName: metroNearestName, nearestDistanceMeters: metroNearestDistance } : {}),
+      ...(metroCount !== undefined ? { stationCountWithin1000m: metroCount } : {}),
+      busEvidenceAvailable: availability.bus,
+      ...(busNearestName && busNearestDistance !== undefined ? { nearestBusStopName: busNearestName, nearestBusStopDistanceMeters: busNearestDistance } : {}),
+      ...(busCount500 !== undefined ? { busStopCountWithin500m: busCount500 } : {}),
+      ...(busCount800 !== undefined ? { busStopCountWithin800m: busCount800 } : {}),
+    };
   }
   if (availability.commercial && isRecord(nearby.commercial) && isNonNegativeInteger(nearby.commercial.countWithin1000m) && typeof nearby.commercial.hasMajorDestination === "boolean" && Array.isArray(nearby.commercial.examples)) {
     evidence.commercial_amenities = {

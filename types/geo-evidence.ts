@@ -50,9 +50,14 @@ export interface CommuteGeoEvidence extends GeoEvidenceBase {
 
 export interface PublicTransportGeoEvidence extends GeoEvidenceBase {
   dimension: "public_transport";
-  nearestStationName: string;
-  nearestDistanceMeters: number;
-  stationCountWithin1000m: number;
+  nearestStationName?: string;
+  nearestDistanceMeters?: number;
+  stationCountWithin1000m?: number;
+  busEvidenceAvailable?: boolean;
+  nearestBusStopName?: string;
+  nearestBusStopDistanceMeters?: number;
+  busStopCountWithin500m?: number;
+  busStopCountWithin800m?: number;
 }
 
 export interface CommercialAmenitiesGeoEvidence extends GeoEvidenceBase {

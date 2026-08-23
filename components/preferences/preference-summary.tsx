@@ -45,7 +45,7 @@ export const PRIORITY_LABELS: Record<DecisionPriority, string> = {
   property_management: "物业服务",
   education: "教育",
   commercial_amenities: "商业生活配套",
-  public_transport: "轨道交通",
+  public_transport: "公共交通便利度",
   liquidity: "流动性",
   value_preservation: "长期保值",
 };

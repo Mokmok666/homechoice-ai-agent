@@ -1,12 +1,12 @@
 import { DIMENSION_LABELS } from "@/lib/decision/dimensions";
 import type { BuyerPreferences, DecisionPriority } from "@/types/buyer-preferences";
-import type { DimensionKey, PropertyDecisionResult } from "@/types/decision";
+import type { DecisionReason, DimensionKey, PropertyDecisionResult } from "@/types/decision";
 import type { GeoEvidenceByProperty, CommutePersonEvidence } from "@/types/geo-evidence";
 import type { Property } from "@/types/property";
 import type { WebEvidenceByProperty } from "@/lib/web-evidence/types";
+import { validateTextField } from "@/lib/decision/dataQuality";
 
-export interface DecisionReasonPresentation { title: string; description: string }
-export interface DecisionRiskPresentation { title: string; description: string }
+export interface DecisionRiskPresentation { title: string; description: string; suggestions: string[]; focusTarget: string }
 export interface ComparisonPresentation {
   property: Property;
   result: PropertyDecisionResult;
@@ -30,19 +30,6 @@ const PRIORITY_DIMENSIONS: Record<DecisionPriority, DimensionKey[]> = {
   value_preservation: ["value_preservation"],
 };
 
-const PRIORITY_LABELS: Record<DecisionPriority, string> = {
-  commute: "通勤便利",
-  price: "价格与购买安全边际",
-  layout_and_space: "户型与空间",
-  community_quality: "小区品质",
-  property_management: "物业服务",
-  education: "教育",
-  commercial_amenities: "商业生活配套",
-  public_transport: "轨道交通",
-  liquidity: "流动性",
-  value_preservation: "长期保值",
-};
-
 function dimension(result: PropertyDecisionResult, key: DimensionKey) {
   return result.dimensions.find((item) => item.key === key);
 }
@@ -51,73 +38,9 @@ function minutes(person: CommutePersonEvidence | undefined): number | null {
   return typeof person?.selectedMinutes === "number" && Number.isFinite(person.selectedMinutes) ? Math.round(person.selectedMinutes) : null;
 }
 
-function commuteText(propertyId: string, geo: GeoEvidenceByProperty): string | null {
-  const commute = geo[propertyId]?.commute;
-  const primary = minutes(commute?.primary);
-  const partner = minutes(commute?.partner);
-  if (primary === null && partner === null) return null;
-  if (primary !== null && partner !== null) return `您的参考通勤约 ${primary} 分钟，伴侣约 ${partner} 分钟`;
-  return primary !== null ? `您的参考通勤约 ${primary} 分钟` : `伴侣参考通勤约 ${partner} 分钟`;
-}
-
-function priorityReason(
-  priority: DecisionPriority,
-  property: Property,
-  result: PropertyDecisionResult,
-  alternative: Property | undefined,
-  preferences: BuyerPreferences,
-  geo: GeoEvidenceByProperty,
-): DecisionReasonPresentation | null {
-  if (priority === "price") {
-    const margin = preferences.maximumBudget - property.totalPrice;
-    const comparison = alternative ? property.totalPrice - alternative.totalPrice : 0;
-    if (margin >= 0) return {
-      title: "预算更从容",
-      description: `预期成交价 ${property.totalPrice} 万元，比最高预算低约 ${Math.round(margin)} 万元${comparison < 0 ? `，也比主要备选低约 ${Math.abs(Math.round(comparison))} 万元` : ""}，为装修和后续支出保留余量。`,
-    };
-    return { title: "价格边界明确", description: `预期成交价比最高预算高约 ${Math.abs(Math.round(margin))} 万元，当前建议已将这一价格压力纳入判断。` };
-  }
-  if (priority === "commute") {
-    const text = commuteText(property.id, geo);
-    if (!text) return null;
-    return { title: geo[property.id]?.commute?.partner ? "家庭通勤更均衡" : "通勤符合当前边界", description: `${text}，路线结果已用于当前通勤匹配判断；实际高峰仍可能波动。` };
-  }
-  if (priority === "layout_and_space") {
-    const areaDifference = alternative ? property.area - alternative.area : 0;
-    return {
-      title: "空间更匹配",
-      description: `${property.area}㎡ · ${property.layout}${areaDifference > 0 ? `，比主要备选多约 ${Math.round(areaDifference)}㎡` : ""}，为当前家庭居住需求提供更明确的空间基础。`,
-    };
-  }
-  const relevant = PRIORITY_DIMENSIONS[priority]
-    .map((key) => dimension(result, key))
-    .find((item) => item?.score !== null && item?.evidence.length);
-  const evidence = relevant?.evidence[0]?.description;
-  return relevant && evidence ? { title: PRIORITY_LABELS[priority], description: evidence } : null;
-}
-
-export function buildWinningReasons(input: {
-  property: Property;
-  result: PropertyDecisionResult;
-  alternative?: Property;
-  preferences: BuyerPreferences;
-  geoEvidenceByProperty: GeoEvidenceByProperty;
-}): DecisionReasonPresentation[] {
-  const ordered = [...input.preferences.topPriorities, "price", "commute", "layout_and_space"] as DecisionPriority[];
-  const seen = new Set<string>();
-  const reasons: DecisionReasonPresentation[] = [];
-  for (const priority of ordered) {
-    const reason = priorityReason(priority, input.property, input.result, input.alternative, input.preferences, input.geoEvidenceByProperty);
-    if (!reason || seen.has(reason.title)) continue;
-    seen.add(reason.title);
-    reasons.push(reason);
-    if (reasons.length === 3) break;
-  }
-  return reasons;
-}
-
-export function buildDecisionSummary(reasons: DecisionReasonPresentation[]): string {
+export function buildDecisionSummary(reasons: ReadonlyArray<Pick<DecisionReason, "title">>): string {
   const labels = reasons.map((reason) => reason.title.replace(/更|当前/g, "")).slice(0, 3);
+  if (labels.length === 1) return `目前最明确的优势是${labels[0]}。`;
   return labels.length > 0
     ? `在${labels.join("、")}之间，目前整体取舍更均衡。`
     : "在当前已知信息下，这套房源与您的家庭需求整体更匹配。";
@@ -137,24 +60,33 @@ export function buildDecisionRisks(input: {
 }): DecisionRiskPresentation[] {
   const risks: DecisionRiskPresentation[] = [];
   const seen = new Set<string>();
-  const add = (title: string, description: string) => {
-    if (!seen.has(title) && risks.length < 4) { seen.add(title); risks.push({ title, description }); }
+  const add = (title: string, description: string, suggestions: string[], focusTarget = "supplemental-information") => {
+    if (!seen.has(title) && risks.length < 4) { seen.add(title); risks.push({ title, description, suggestions, focusTarget }); }
   };
   const transaction = dimension(input.result, "transaction_price_reasonableness");
   const management = dimension(input.result, "property_management");
   const community = dimension(input.result, "community_quality");
   const commute = input.geoEvidenceByProperty[input.property.id]?.commute;
   const education = dimension(input.result, "education");
+  const hasPropertyExperience = validateTextField(input.property.propertyExperience).status === "valid";
+  const hasActualCommuteExperience = validateTextField(input.property.actualCommuteExperience).status === "valid";
+  const communityChecks = [
+    [input.property.environment, "查看绿化、卫生和采光"],
+    [input.property.noise, "在不同时段确认噪音"],
+    [input.property.parking, "核实车位和停车费用"],
+    [input.property.publicArea, "查看大堂、电梯和走廊维护"],
+  ] as const;
+  const missingCommunityChecks = communityChecks.filter(([value]) => validateTextField(value).status !== "valid").map(([, suggestion]) => suggestion);
 
   for (const priority of [...input.preferences.topPriorities, "property_management", "price", "community_quality", "commute", "education"] as DecisionPriority[]) {
-    if (priority === "price" && transaction?.score === null) add("真实成交价", `近期同户型可比成交样本不足，${input.property.totalPrice} 万元仍属于预期成交假设。`);
-    if (priority === "property_management" && management?.status !== "known") add("物业实际服务", webConclusion(input.webEvidenceByProperty, input.property.id, "property_management") ?? "目前缺少该小区真实服务记录，需要在购买前进一步确认。");
-    if (priority === "community_quality" && community?.status !== "known") add("小区实际品质", webConclusion(input.webEvidenceByProperty, input.property.id, "community_quality") ?? "公开资料尚不足以替代现场看房和长期住户体验。");
-    if (priority === "commute" && (!commute?.primary || commute.primary.status === "unavailable")) add("实际通勤体验", "当前缺少稳定路线证据，建议在常用时段实地确认门到门通勤体验。");
-    if (priority === "education" && input.preferences.educationNeed !== "none" && education?.status !== "known") add("教育资格", "当前信息不能证明具体入学资格，仍需以最新官方政策和实际资格核验为准。");
+    if (priority === "price" && transaction?.score === null) add("真实成交价", input.property.recentDealPrice ? `已记录 ${input.property.recentDealPrice} 万元成交价格线索，但近期同户型可比成交样本仍不足，当前预期成交价尚需核验。` : `近期同户型可比成交样本不足，${input.property.totalPrice} 万元仍属于预期成交假设。`, ["向中介或业主索取同户型成交记录", "核对成交日期、面积和可靠来源"], "transaction-references");
+    if (priority === "property_management" && management?.status !== "known" && !hasPropertyExperience) add("物业实际服务", webConclusion(input.webEvidenceByProperty, input.property.id, "property_management") ?? "目前只能确认管理主体，缺少该小区真实服务体验。", ["确认物业费和其他固定费用", "询问住户报修、门岗和保洁体验"], "property-service");
+    if (priority === "community_quality" && community?.status !== "known" && missingCommunityChecks.length > 0) add("小区实际品质", webConclusion(input.webEvidenceByProperty, input.property.id, "community_quality") ?? "公开资料尚不足以替代现场看房和长期住户体验。", missingCommunityChecks.slice(0, 3), "community-quality");
+    if (priority === "commute" && (!commute?.primary || commute.primary.status === "unavailable") && !hasActualCommuteExperience) add("实际通勤体验", "当前缺少稳定路线证据，建议在常用时段实地确认门到门通勤体验。", ["在工作日常用时段实测路线", "记录门到门耗时和换乘等待"], "actual-commute-experience");
+    if (priority === "education" && input.preferences.educationNeed !== "none" && education?.status !== "known") add("教育资格", "当前信息不能证明具体入学资格，仍需以最新官方政策和实际资格核验为准。", ["核对当年招生范围", "向主管部门确认家庭资格条件"], "school-information");
   }
-  for (const mismatch of input.result.hardMismatches) add(DIMENSION_LABELS[mismatch.dimension], mismatch.reason);
-  for (const item of input.result.confidence.evidenceItems.filter((evidence) => evidence.category === "optional_confirmation")) add(item.title, item.description);
+  for (const mismatch of input.result.hardMismatches) add(DIMENSION_LABELS[mismatch.dimension], mismatch.reason, ["核实当前输入与购买边界"]);
+  for (const item of input.result.confidence.evidenceItems.filter((evidence) => evidence.category === "optional_confirmation")) add(item.title, item.description, [item.description]);
   return risks.slice(0, 4);
 }
 

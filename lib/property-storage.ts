@@ -44,6 +44,14 @@ function optionalPositiveInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
 }
 
+function optionalPositiveNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function optionalText(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 function parseLayoutCounts(layout: string): { rooms: number; livingRooms: number; bathrooms: number } {
   const match = layout.match(/(\d+)室(?:及以上)?(?:(\d+)厅)?(?:(\d+)卫)?/);
   return {
@@ -150,6 +158,15 @@ function normalizeProperty(value: unknown): Property | null {
   normalized.listingPrice = typeof property.listingPrice === "number" && Number.isFinite(property.listingPrice) && property.listingPrice > 0
     ? property.listingPrice
     : null;
+  normalized.propertyCompany = optionalText(property.propertyCompany) ?? optionalText(property.propertyManagementInformation);
+  normalized.propertyFee = optionalPositiveNumber(property.propertyFee);
+  normalized.propertyExperience = optionalText(property.propertyExperience);
+  normalized.environment = optionalText(property.environment);
+  normalized.noise = optionalText(property.noise);
+  normalized.parking = optionalText(property.parking);
+  normalized.publicArea = optionalText(property.publicArea);
+  normalized.actualCommuteExperience = optionalText(property.actualCommuteExperience);
+  normalized.recentDealPrice = optionalPositiveNumber(property.recentDealPrice);
   normalized.deliveryYear = typeof property.deliveryYear === "number" && Number.isInteger(property.deliveryYear) && property.deliveryYear >= 1900 && property.deliveryYear <= 2100
     ? property.deliveryYear
     : null;

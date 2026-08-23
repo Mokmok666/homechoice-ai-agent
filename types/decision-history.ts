@@ -1,5 +1,5 @@
 import type { BuyerPreferences } from "./buyer-preferences";
-import type { DecisionEngineResult } from "./decision";
+import type { DecisionEngineResult, DecisionReason } from "./decision";
 import type { Property } from "./property";
 import type { PropertyIntelligence } from "./property-intelligence";
 
@@ -14,6 +14,7 @@ export interface DecisionHistoryRecord {
   readonly decisionResult: DecisionEngineResult;
   readonly recommendedPropertyId: string | null;
   readonly aiOverallSummary: string | null;
+  readonly decisionReasons?: readonly DecisionReason[];
   readonly propertyIntelligence?: readonly PropertyIntelligence[];
 }
 

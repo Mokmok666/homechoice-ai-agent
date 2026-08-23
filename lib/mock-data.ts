@@ -1,6 +1,6 @@
 import type { BuyerPreference, DecisionHistoryItem, DimensionScore, Property } from "./types";
 const groups=["区位与家庭生活","房屋与居住体验","价格与购买安全边际","长期价值"];
-const labels=["地段成熟度","通勤便利度","轨道交通便利度","商业生活配套","教育 / 学区匹配度","医疗及基础生活配套","户型设计","空间匹配度","房龄 / 楼龄","小区品质","物业服务评价","总价预算匹配度","真实成交价合理度","流动性","保值潜力"];
+const labels=["地段成熟度","通勤便利度","公共交通便利度","商业生活配套","教育 / 学区匹配度","医疗及基础生活配套","户型设计","空间匹配度","房龄 / 楼龄","小区品质","物业服务评价","总价预算匹配度","真实成交价合理度","流动性","保值潜力"];
 const scores=[9,8.6,8.8,8.5,7.4,8.2,8.5,8.7,7.2,8,8.3,7.5,7.6,8.1,8.4];
 const dimensions:DimensionScore[]=labels.map((label,i)=>({label,score:scores[i],group:groups[i<6?0:i<11?1:i<13?2:3]}));
 export const properties:Property[]=[

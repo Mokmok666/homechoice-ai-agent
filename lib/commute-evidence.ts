@@ -106,7 +106,7 @@ export function buildCommuteGeoEvidence(
       ? "partial"
       : "verified";
   const parts = [
-    usablePrimary ? `你的参考通勤约 ${primary.selectedMinutes} 分钟` : "你的通勤路线暂不可用",
+    usablePrimary ? `本人约 ${primary.selectedMinutes} 分钟` : "本人通勤路线暂不可用",
     partnerPreference ? (usablePartner ? `伴侣约 ${partner.selectedMinutes} 分钟` : "伴侣通勤路线暂不可用") : null,
   ].filter(Boolean);
   return {

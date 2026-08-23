@@ -1,6 +1,7 @@
 import type { BuyerPreferences } from "../../types/buyer-preferences";
 import type { EvidenceItem } from "../../types/decision";
 import type { Property } from "../../types/property";
+import { validateTextField } from "./dataQuality";
 
 function item(
   id: string,
@@ -16,6 +17,7 @@ export function buildEvidenceItems(
   property: Property,
   preferences: BuyerPreferences,
 ): EvidenceItem[] {
+  const hasValidText = (value: string | null | undefined) => validateTextField(value).status === "valid";
   const evidence: EvidenceItem[] = [
     item("location", "房源位置", "confirmed", `${property.city} · ${property.district} · ${property.address}`, "用户输入"),
     item("area", "建筑面积", "confirmed", `${property.area}㎡`, "用户输入"),
@@ -30,11 +32,37 @@ export function buildEvidenceItems(
   if (property.propertyManagementInformation.trim()) {
     evidence.push(item("property-management", "物业信息", "confirmed", property.propertyManagementInformation, "用户输入"));
   }
-  if ((property.comparableTransactions?.length ?? 0) > 0) {
-    evidence.push(item("comparables", "成交参考", "confirmed", `已记录 ${property.comparableTransactions!.length} 条成交参考`, "用户输入"));
+  if (property.propertyFee !== null && property.propertyFee !== undefined && Number.isFinite(property.propertyFee) && property.propertyFee > 0) {
+    evidence.push(item("property-fee", "物业费", "confirmed", `${property.propertyFee} 元/㎡/月`, "用户补充"));
+  }
+  if (hasValidText(property.propertyExperience)) {
+    evidence.push(item("property-experience", "物业服务体验", "confirmed", property.propertyExperience!, "用户现场观察"));
+  }
+  const communityObservations = [
+    ["community-environment", "小区环境", property.environment],
+    ["community-noise", "噪音情况", property.noise],
+    ["community-parking", "停车情况", property.parking],
+    ["community-public-area", "公共区域", property.publicArea],
+  ] as const;
+  for (const [id, title, value] of communityObservations) {
+    if (hasValidText(value)) evidence.push(item(id, title, "confirmed", value!, "用户现场观察"));
+  }
+  if (hasValidText(property.actualCommuteExperience)) {
+    evidence.push(item("actual-commute-experience", "实际通勤体验", "confirmed", property.actualCommuteExperience!, "用户实测记录"));
+  }
+  if (property.recentDealPrice !== null && property.recentDealPrice !== undefined && Number.isFinite(property.recentDealPrice) && property.recentDealPrice > 0) {
+    evidence.push(item("recent-deal-lead", "历史成交价格线索", "optional_confirmation", `${property.recentDealPrice} 万元（旧数据待核验，不等同于已确认可比成交）`, "历史用户输入"));
+  }
+  const confirmedComparables = property.comparableTransactions?.filter((transaction) => transaction.confirmed) ?? [];
+  const unconfirmedComparables = property.comparableTransactions?.filter((transaction) => !transaction.confirmed) ?? [];
+  if (confirmedComparables.length > 0) {
+    evidence.push(item("comparables-confirmed", "已确认成交参考", "confirmed", `已记录 ${confirmedComparables.length} 条用户标记为已确认的成交参考，仍由规则核验日期与完整性`, "用户输入"));
+  }
+  if (unconfirmedComparables.length > 0) {
+    evidence.push(item("comparables-lead", "待核验成交参考", "optional_confirmation", `已记录 ${unconfirmedComparables.length} 条未确认成交线索，不参与成交价评分`, "用户输入"));
   }
   if (property.metroDistance !== null) {
-    evidence.push(item("metro", "轨道交通距离", "confirmed", `距最近地铁站约 ${property.metroDistance} 米`, "用户输入"));
+    evidence.push(item("metro", "公共交通距离线索", "confirmed", `距最近地铁站约 ${property.metroDistance} 米`, "用户输入"));
   }
   if (property.deliveryYear) {
     evidence.push(item("delivery-year", "交付年份", "confirmed", `${property.deliveryYear} 年`, "用户输入"));
@@ -58,16 +86,19 @@ export function buildEvidenceItems(
     item("ai-value", "长期保值", "ai_inferred", "未来结合区域产业、交通和人口趋势分析", "AI分析"),
   );
 
-  if (preferences.commuteMode !== "not_important") {
+  if (preferences.commuteMode !== "not_important" && !hasValidText(property.actualCommuteExperience)) {
     evidence.push(item("confirm-commute", "实际通勤体验", "optional_confirmation", "建议在工作日高峰实测，不影响当前判断", "用户确认"));
   }
   if (preferences.educationNeed !== "none") {
     evidence.push(item("confirm-enrollment", "入学与学位资格", "optional_confirmation", "建议向学校或主管部门核实，不影响当前判断", "用户确认"));
   }
-  evidence.push(
-    item("confirm-management", "物业费用与服务细节", "optional_confirmation", "可进一步核实收费标准和真实服务体验", "用户确认"),
-    item("confirm-layout", "户型实际利用率", "optional_confirmation", "可通过户型图或实地看房进一步确认", "用户确认"),
-  );
+  if (!hasValidText(property.propertyExperience)) {
+    evidence.push(item("confirm-management", "物业费用与服务细节", "optional_confirmation", "可进一步核实收费标准和真实服务体验", "用户确认"));
+  }
+  if (![property.environment, property.noise, property.parking, property.publicArea].every(hasValidText)) {
+    evidence.push(item("confirm-community", "小区现场品质", "optional_confirmation", "可进一步查看公区维护、噪音、停车和环境", "用户确认"));
+  }
+  evidence.push(item("confirm-layout", "户型实际利用率", "optional_confirmation", "可通过户型图或实地看房进一步确认", "用户确认"));
   if ((property.comparableTransactions?.length ?? 0) < 3) {
     evidence.push(item("confirm-comparables", "近期成交参考", "optional_confirmation", "增加可靠成交样本可提升价格判断可信度", "用户确认"));
   }

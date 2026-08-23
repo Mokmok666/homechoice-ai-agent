@@ -319,7 +319,7 @@ export function BuyerPreferencesForm() {
           </Card>
 
           <Card>
-            <SectionHeading number="05" title="最重要的 3 个购房因素" description="点击顺序即重要程度；取消后可重新选择。" />
+            <SectionHeading number="05" title="希望AI优先考虑的3个因素" description="用于调整15维决策权重，不代表最终推荐理由一定只来自这三项。点击顺序即优先程度。" />
             <CardContent className="px-6 py-7 sm:px-8">
               <div className="mb-4 flex items-center justify-between"><Label>决策优先级 *</Label><span className={`rounded-full px-3 py-1 text-sm font-medium ${form.topPriorities.length === 3 ? "bg-[#eaf0e7] text-[#5b7054]" : "bg-[#f1f0eb] text-[#73766f]"}`}>{form.topPriorities.length} / 3</span></div>
               <div className="grid gap-3 sm:grid-cols-2" aria-invalid={Boolean(errors.topPriorities)} aria-describedby={errors.topPriorities ? "topPriorities-error" : undefined}>

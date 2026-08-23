@@ -1,6 +1,6 @@
 import type { DimensionKey } from "@/types/decision";
 
-export const WEB_EVIDENCE_VERSION = 1 as const;
+export const WEB_EVIDENCE_VERSION = 2 as const;
 export const WEB_EVIDENCE_PROVIDER_ID = "tavily-search-v1" as const;
 export const WEB_EVIDENCE_LEGACY_PROVIDER_ID = "zhipu-web-search-v2" as const;
 export const WEB_EVIDENCE_INTERPRETATION_VERSION = 2 as const;
@@ -8,6 +8,7 @@ export const WEB_EVIDENCE_TARGET_DIMENSIONS = [
   "location_maturity",
   "community_quality",
   "property_management",
+  "education",
   "transaction_price_reasonableness",
   "liquidity",
   "value_preservation",

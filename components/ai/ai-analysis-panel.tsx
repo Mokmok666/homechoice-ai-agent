@@ -7,8 +7,10 @@ import { findAIAnalysisBySignature, findLatestAIAnalysisForProperty, saveAIAnaly
 import { requestAIAnalysis } from "@/lib/ai/client";
 import { projectAIAnalysisContext } from "@/lib/ai/input";
 import { createAIInputSignature } from "@/lib/ai/signature";
+import { RECOMMENDATION_BADGE_STYLES, RECOMMENDATION_LABELS } from "@/lib/recommendation-presentation";
 import { AI_ANALYSIS_SCHEMA_VERSION, type AIAnalysis, type AIAnalysisRequest } from "@/types/ai-analysis";
 import type { BuyerPreferences } from "@/types/buyer-preferences";
+import type { DecisionPriority } from "@/types/buyer-preferences";
 import type { DecisionEngineResult } from "@/types/decision";
 import type { GeoEvidenceByProperty } from "@/types/geo-evidence";
 import type { Property } from "@/types/property";
@@ -29,6 +31,19 @@ type PanelState =
   | { status: "stale" }
   | { status: "success"; analysis: AIAnalysis; warning?: string }
   | { status: "error"; message: string };
+
+const PRIORITY_LABELS: Record<DecisionPriority, string> = {
+  commute: "通勤",
+  price: "预算与价格",
+  layout_and_space: "户型与空间",
+  community_quality: "小区品质",
+  property_management: "物业服务",
+  education: "教育需求",
+  commercial_amenities: "商业生活",
+  public_transport: "公共交通",
+  liquidity: "流动性",
+  value_preservation: "长期价值",
+};
 
 function buildRequest(
   properties: Property[],
@@ -162,6 +177,8 @@ export function AIAnalysisPanel({ properties, preferences, engine, geoEvidenceBy
           deterministicTopName={topCandidate.property.name ?? "当前首选房源"}
           matchScore={topCandidate.decision.matchScore}
           recommendation={topCandidate.decision.recommendation}
+          topPriorities={request?.context.preferences.topPriorities ?? preferences.topPriorities}
+          alternativeName={request?.context.candidates[1]?.property.name ?? null}
           warning={state.warning}
         />
       )}
@@ -174,27 +191,33 @@ function AnalysisContent({
   deterministicTopName,
   matchScore,
   recommendation,
+  topPriorities,
+  alternativeName,
   warning,
 }: {
   analysis: AIAnalysis;
   deterministicTopName: string;
   matchScore: number | null;
   recommendation: "CONSIDER" | "WAIT" | "PASS";
+  topPriorities: DecisionPriority[];
+  alternativeName: string | null;
   warning?: string;
 }) {
-  const recommendationLabel = { CONSIDER: "优先考虑", WAIT: "谨慎考虑", PASS: "暂不推荐" }[recommendation];
+  const recommendationLabel = RECOMMENDATION_LABELS[recommendation];
+  const decisionSummary = analysis.decisionSummary.replace(/^\s*推荐结论\s*[：:]\s*/, "");
   return (
     <div className="space-y-5 p-6 sm:p-8">
       {warning && <div className="flex items-start gap-3 rounded-xl border border-[#eadfca] bg-[#faf6ed] p-4 text-sm text-[#78684a]"><AlertTriangle className="mt-0.5 shrink-0" size={18} /><p>{warning}</p></div>}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="font-serif text-xl">最适合您的房源：{deterministicTopName}</h3>
         <div className="flex items-center gap-2 text-xs">
-          <span className="rounded-full bg-[#edf3e9] px-3 py-1.5 font-medium text-[#5f7358]">{recommendationLabel}</span>
+          <span className={`rounded-full px-3 py-1.5 font-medium ${RECOMMENDATION_BADGE_STYLES[recommendation]}`}>{recommendationLabel}</span>
           {matchScore !== null && <span className="rounded-full bg-[#f3f2ed] px-3 py-1.5 text-[#747772]">当前匹配度 {Math.round(matchScore)}</span>}
         </div>
       </div>
-      <p className="text-sm leading-8 text-[#626560]">{analysis.decisionSummary}</p>
-      {analysis.pendingEvidence.length > 0 && <AnalysisList title="仍可确认" items={analysis.pendingEvidence} />}
+      <div className="flex flex-wrap gap-2 text-xs text-[#667061]"><span className="py-1.5">您当前最关注：</span>{topPriorities.map((priority, index) => <span key={priority} className="rounded-full bg-[#f3f5f0] px-3 py-1.5">{index + 1}. {PRIORITY_LABELS[priority]}</span>)}</div>
+      <div className="rounded-xl bg-[#faf9f6] p-4 sm:p-5"><h4 className="text-sm font-semibold text-[#5d6658]">推荐结论</h4><p className="mt-2 text-sm leading-8 text-[#626560]">{decisionSummary}</p>{alternativeName && <p className="mt-3 text-xs text-[#898b86]">主要比较对象：{alternativeName}</p>}</div>
+      {analysis.pendingEvidence.length > 0 && <AnalysisList title="建议下一步确认" items={analysis.pendingEvidence} />}
       <p className="text-xs leading-5 text-[#8a8c87]">{analysis.disclaimer}</p>
     </div>
   );

@@ -1,22 +1,11 @@
 import Link from "next/link";
 import { ArrowRight, Building2, MapPin, Sparkles } from "lucide-react";
 import { ScoreRing } from "@/components/decision/score-ring";
+import { RECOMMENDATION_BADGE_STYLES, RECOMMENDATION_LABELS } from "@/lib/recommendation-presentation";
 import type { PropertyDecisionResult } from "@/types/decision";
 import type { Property } from "@/types/property";
 
 const ANALYSIS_CONFIDENCE_LABELS = { provisional: "阶段性", supported: "较充分" } as const;
-const RECOMMENDATION_LABELS = {
-  CONSIDER: "优先考虑",
-  WAIT: "谨慎考虑",
-  PASS: "暂不推荐",
-} as const;
-
-const RECOMMENDATION_STYLES = {
-  CONSIDER: "bg-[#e7f1ea] text-[#477056]",
-  WAIT: "bg-[#f5f0e5] text-[#806b3e]",
-  PASS: "bg-[#f8e9e6] text-[#934f45]",
-} as const;
-
 export function DecisionPropertyCard({
   property,
   result,
@@ -33,7 +22,7 @@ export function DecisionPropertyCard({
     <Link href={`/results/${property.id}`} className="card flex h-full min-w-0 flex-col p-5 transition hover:-translate-y-0.5 hover:shadow-[0_14px_38px_rgba(58,55,46,0.08)]">
       <div className="flex items-start justify-between gap-4">
         <span className="rounded-full bg-[#eef2eb] px-3 py-1 text-xs font-medium text-[#5c7055]">当前第 {rank} 位</span>
-        <span className={`rounded-full px-3 py-1 text-xs font-medium ${RECOMMENDATION_STYLES[result.recommendation]}`}>{result.recommendation} · {RECOMMENDATION_LABELS[result.recommendation]}</span>
+        <span className={`rounded-full px-3 py-1 text-xs font-medium ${RECOMMENDATION_BADGE_STYLES[result.recommendation]}`}>{result.recommendation} · {RECOMMENDATION_LABELS[result.recommendation]}</span>
       </div>
 
       <div className="mt-5 flex min-w-0 items-start gap-4">

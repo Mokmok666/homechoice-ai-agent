@@ -6,13 +6,14 @@ import { AlertCircle, ArrowLeft, Building2, CalendarDays, MapPin, Sparkles } fro
 import { ScoreRing } from "@/components/decision/score-ring";
 import { PropertyIntelligenceCard } from "@/components/intelligence/property-intelligence-card";
 import { getDecisionHistoryById } from "@/lib/decision-history-storage";
+import { RECOMMENDATION_BADGE_STYLES, RECOMMENDATION_LABELS, RECOMMENDATION_TEXT_STYLES } from "@/lib/recommendation-presentation";
 import type { DecisionHistoryRecord } from "@/types/decision-history";
 
-const RECOMMENDATION_LABELS = {
-  CONSIDER: "优先考虑",
-  WAIT: "谨慎考虑",
-  PASS: "暂不推荐",
-} as const;
+function normalizeCommuteDurationCopy(value: string): string {
+  return value
+    .replace(/本人\s*(?:约)?\s*(\d+)\s*分(?!钟)/g, "本人约$1分钟")
+    .replace(/伴侣\s*(?:约)?\s*(\d+)\s*分(?!钟)/g, "伴侣约$1分钟");
+}
 
 export function DecisionHistoryDetail({ historyId }: { historyId: string }) {
   const [record, setRecord] = useState<DecisionHistoryRecord | null | undefined>(undefined);
@@ -47,7 +48,7 @@ export function DecisionHistoryDetail({ historyId }: { historyId: string }) {
         <section className="card mt-7 p-6 sm:p-8">
           <p className="text-xs font-medium uppercase tracking-[0.18em] text-[#75886d]">当时排序第一</p>
           <div className="mt-3 flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-            <div><h2 className="font-serif text-2xl">{topProperty.name}</h2><p className="mt-2 text-sm text-[#72756f]">{RECOMMENDATION_LABELS[topResult.recommendation]} · {topResult.reasons.join(" ")}</p></div>
+            <div><h2 className="font-serif text-2xl">{topProperty.name}</h2><p className="mt-2 text-sm text-[#72756f]"><span className={`font-medium ${RECOMMENDATION_TEXT_STYLES[topResult.recommendation]}`}>{RECOMMENDATION_LABELS[topResult.recommendation]}</span> · 基于当时已确认事实和家庭偏好，该房源是当时排序最靠前的候选。</p></div>
             {topResult.overallScore === null ? <b className="text-[#75886d]">阶段性判断</b> : <ScoreRing score={topResult.overallScore} size={88} label="当时匹配" />}
           </div>
         </section>
@@ -59,17 +60,43 @@ export function DecisionHistoryDetail({ historyId }: { historyId: string }) {
           if (!property) return null;
           return (
             <article key={result.propertyId} className="card p-5">
-              <div className="flex items-center justify-between gap-3"><span className="rounded-full bg-[#eef2eb] px-3 py-1 text-xs text-[#5c7055]">第 {index + 1} 位</span><b className="text-xs text-[#806b3e]">{result.recommendation} · {RECOMMENDATION_LABELS[result.recommendation]}</b></div>
+              <div className="flex items-center justify-between gap-3"><span className="rounded-full bg-[#eef2eb] px-3 py-1 text-xs text-[#5c7055]">第 {index + 1} 位</span><b className={`rounded-full px-2.5 py-1 text-xs ${RECOMMENDATION_BADGE_STYLES[result.recommendation]}`}>{result.recommendation} · {RECOMMENDATION_LABELS[result.recommendation]}</b></div>
               <div className="mt-5 flex gap-4"><span className="grid size-12 shrink-0 place-items-center rounded-xl bg-[#f1f2ed] text-[#75886d]"><Building2 size={23} /></span><div className="min-w-0"><h2 className="truncate font-semibold">{property.name}</h2><p className="mt-1 flex items-center gap-1 text-xs text-[#7d807a]"><MapPin size={13} />{property.city} · {property.district}</p></div></div>
-              <p className="mt-4 text-sm text-[#696c67]">{property.layout} · {property.area}㎡ · 预期成交价 {property.totalPrice} 万</p>
+              <p className="mt-4 text-sm text-[#696c67]">{property.layout} · {property.area}㎡</p>
+              <div className="mt-3 rounded-xl bg-[#faf8f3] p-3 text-xs leading-6 text-[#696c67]">
+                <span>挂牌价 <b>{property.listingPrice ?? "未记录"}{property.listingPrice ? " 万" : ""}</b></span>
+                <span className="mx-2 text-[#a2a39f]">→</span>
+                <span>预期成交价 <b>{property.totalPrice} 万</b></span>
+                {property.listingPrice && property.listingPrice > 0 && (
+                  <span className="mt-1 block text-[#858782]">当前决策假设差额约 {Math.abs(property.listingPrice - property.totalPrice).toFixed(1).replace(/\.0$/, "")} 万（{(Math.abs(property.listingPrice - property.totalPrice) / property.listingPrice * 100).toFixed(1)}%）</span>
+                )}
+              </div>
               <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-[#f7f6f2] p-3 text-xs"><span>匹配度 <b className="block text-lg">{result.overallScore ?? "—"}</b></span><span>完整度 <b className="block text-lg">{result.confidence.dataCompletenessPercent}%</b></span></div>
             </article>
           );
         })}
       </section>
 
+      {record.decisionReasons && record.decisionReasons.length > 0 && (
+        <section className="card mt-7 p-6 sm:p-8">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-[#75886d]">Saved decision reasons</p>
+          <h2 className="mt-2 font-serif text-2xl">当时的主要决策理由</h2>
+          <div className="mt-5 grid gap-3 md:grid-cols-3">
+            {record.decisionReasons.map((reason) => (
+              <article key={`${reason.dimension}-${reason.title}`} className="rounded-xl bg-[#f7f6f2] p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-sm font-semibold">{reason.title}</h3>
+                  {reason.label && <span className="rounded-full bg-white px-2.5 py-1 text-[10px] text-[#687563]">{reason.label}</span>}
+                </div>
+                <p className="mt-2 text-xs leading-6 text-[#70736e]">{normalizeCommuteDurationCopy(reason.description)}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
       {record.aiOverallSummary && (
-        <section className="card mt-7 p-6 sm:p-8"><h2 className="flex items-center gap-3 font-serif text-2xl"><Sparkles className="text-[#75886d]" />当时的 AI 解读摘要</h2><p className="mt-4 whitespace-pre-line text-sm leading-7 text-[#696c67]">{record.aiOverallSummary}</p></section>
+        <section className="card mt-7 p-6 sm:p-8"><h2 className="flex items-center gap-3 font-serif text-2xl"><Sparkles className="text-[#75886d]" />当时的 AI 解读摘要</h2><p className="mt-4 whitespace-pre-line text-sm leading-7 text-[#696c67]">{normalizeCommuteDurationCopy(record.aiOverallSummary)}</p></section>
       )}
 
       {record.propertyIntelligence && record.propertyIntelligence.length > 0 && (

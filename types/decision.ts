@@ -1,6 +1,7 @@
 import type { BuyerPreferences } from "./buyer-preferences";
 import type { Property } from "./property";
 import type { GeoEvidenceByProperty } from "./geo-evidence";
+import type { WebEvidenceByProperty } from "../lib/web-evidence/types";
 
 export const DIMENSION_KEYS = [
   "location_maturity",
@@ -95,6 +96,14 @@ export interface HardMismatch {
   reason: string;
 }
 
+export interface DecisionReason {
+  title: string;
+  description: string;
+  dimension: DimensionKey;
+  confidence: "high" | "medium" | "low";
+  label?: "您的重点偏好" | "关键差异" | "强证据支持";
+}
+
 export interface PropertyDecisionResult {
   propertyId: string;
   overallScore: number | null;
@@ -112,10 +121,11 @@ export interface DecisionEngineInput {
   preferences: BuyerPreferences;
   asOfDate: string;
   geoEvidenceByProperty?: GeoEvidenceByProperty;
+  webEvidenceByProperty?: WebEvidenceByProperty;
 }
 
 export interface DecisionEngineResult {
-  engineVersion: "decision-engine-v1";
+  engineVersion: "decision-engine-v1" | "decision-engine-v2";
   asOfDate: string;
   weights: Record<DimensionKey, number>;
   results: PropertyDecisionResult[];

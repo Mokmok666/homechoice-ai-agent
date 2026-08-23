@@ -36,6 +36,20 @@ function isValidHistoryRecord(value: unknown): value is DecisionHistoryRecord {
     return false;
   }
 
+  if (
+    value.decisionReasons !== undefined &&
+    (!Array.isArray(value.decisionReasons) || value.decisionReasons.length > 3 || value.decisionReasons.some((reason) =>
+      !isRecord(reason) ||
+      typeof reason.title !== "string" ||
+      typeof reason.description !== "string" ||
+      typeof reason.dimension !== "string" ||
+      !["high", "medium", "low"].includes(String(reason.confidence)) ||
+      (reason.label !== undefined && !["您的重点偏好", "关键差异", "强证据支持"].includes(String(reason.label)))
+    ))
+  ) {
+    return false;
+  }
+
   const propertiesAreValid = value.properties.every((property) =>
     isRecord(property) &&
     typeof property.id === "string" &&
@@ -43,6 +57,7 @@ function isValidHistoryRecord(value: unknown): value is DecisionHistoryRecord {
     typeof property.city === "string" &&
     typeof property.district === "string" &&
     typeof property.totalPrice === "number" &&
+    (property.listingPrice === undefined || property.listingPrice === null || typeof property.listingPrice === "number") &&
     typeof property.area === "number" &&
     typeof property.layout === "string"
   );

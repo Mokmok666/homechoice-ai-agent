@@ -7,6 +7,9 @@ import {
 import type { DecisionEngineResult, DimensionEvaluation } from "@/types/decision";
 
 function mergeDimension(dimension: DimensionEvaluation, propertyEvidence: PropertyWebEvidence | undefined): DimensionEvaluation {
+  // Long-term value is derived from existing scored structural dimensions.
+  // Web context may still be available to AI, but it is not an independent source for this dimension.
+  if (dimension.key === "value_preservation") return dimension;
   const web = propertyEvidence?.dimensions.find((item) => item.dimensionKey === dimension.key);
   if (!web || web.status === "unavailable" || web.facts.length === 0) return dimension;
   const quality = web.status === "verified" ? 0.85 : 0.6;
@@ -32,27 +35,40 @@ export function mergeWebEvidenceIntoEngine(engine: DecisionEngineResult, webEvid
   };
 }
 
-export function externalEvidenceCoverage(evidence: PropertyWebEvidence | undefined): { completed: number; total: number } {
+interface ExternalEvidenceCoverageOptions { educationApplicable?: boolean }
+
+export function externalEvidenceCoverageDimensions(options: ExternalEvidenceCoverageOptions = {}): WebEvidenceDimensionKey[] {
+  return WEB_EVIDENCE_TARGET_DIMENSIONS.filter((key) =>
+    key !== "value_preservation" && (key !== "education" || options.educationApplicable !== false)
+  );
+}
+
+export function externalEvidenceCoverage(evidence: PropertyWebEvidence | undefined, options: ExternalEvidenceCoverageOptions = {}): { completed: number; total: number } {
+  const dimensions = externalEvidenceCoverageDimensions(options);
   return {
-    completed: evidence?.dimensions.filter((item) => item.status !== "unavailable" && item.facts.length > 0).length ?? 0,
-    total: WEB_EVIDENCE_TARGET_DIMENSIONS.length,
+    completed: dimensions.filter((key) => {
+      const item = evidence?.dimensions.find((dimension) => dimension.dimensionKey === key);
+      return Boolean(item && item.status !== "unavailable" && item.facts.length > 0);
+    }).length,
+    total: dimensions.length,
   };
 }
 
-export function externalEvidenceCoverageDetails(evidence: PropertyWebEvidence | undefined): {
+export function externalEvidenceCoverageDetails(evidence: PropertyWebEvidence | undefined, options: ExternalEvidenceCoverageOptions = {}): {
   completed: number;
   total: number;
   covered: WebEvidenceDimensionKey[];
   uncovered: WebEvidenceDimensionKey[];
 } {
-  const covered = WEB_EVIDENCE_TARGET_DIMENSIONS.filter((dimensionKey) => {
+  const dimensions = externalEvidenceCoverageDimensions(options);
+  const covered = dimensions.filter((dimensionKey) => {
     const dimension = evidence?.dimensions.find((item) => item.dimensionKey === dimensionKey);
     return Boolean(dimension && dimension.status !== "unavailable" && dimension.facts.length > 0);
   });
   return {
     completed: covered.length,
-    total: WEB_EVIDENCE_TARGET_DIMENSIONS.length,
+    total: dimensions.length,
     covered,
-    uncovered: WEB_EVIDENCE_TARGET_DIMENSIONS.filter((dimensionKey) => !covered.includes(dimensionKey)),
+    uncovered: dimensions.filter((dimensionKey) => !covered.includes(dimensionKey)),
   };
 }

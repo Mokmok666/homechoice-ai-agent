@@ -9,6 +9,7 @@ const DIMENSION_TERMS: Record<WebEvidenceDimensionKey, RegExp> = {
   location_maturity: /规划|板块|配套|交通|公共服务|区域|发展/,
   community_quality: /小区|社区|品质|开发商|项目|交付|园林|建筑/,
   property_management: /物业|服务|物业费|管理公司/,
+  education: /招生|入学|教育|学校|服务范围|学区|划片|对口/,
   transaction_price_reasonableness: /成交|网签|成交价|二手房|挂牌|在售|报价/,
   liquidity: /成交|网签|二手房|挂牌|去化|流通|近一年/,
   value_preservation: /规划|产业|交通|区域发展|人口|就业|保值|长期/,

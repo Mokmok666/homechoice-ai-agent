@@ -11,13 +11,15 @@ import { projectAIAnalysisContext } from "@/lib/ai/input";
 import { createAIInputSignature } from "@/lib/ai/signature";
 import { BUYER_PREFERENCES_STORAGE_KEY, loadBuyerPreferences } from "@/lib/buyer-preferences-storage";
 import { runDecisionEngine } from "@/lib/decision/engine";
-import { buildDecisionRisks, buildDecisionSummary, buildQuickComparison, buildWinningReasons } from "@/lib/decision-presentation";
+import { generateDecisionReasons } from "@/lib/decision/reason-generator";
+import { buildDecisionRisks, buildDecisionSummary, buildQuickComparison } from "@/lib/decision-presentation";
 import { saveDecisionHistory } from "@/lib/decision-history-storage";
 import { GEO_EVIDENCE_STORAGE_KEY, loadCachedGeoEvidenceForProperties } from "@/lib/geo-evidence-storage";
 import { getProperties, PROPERTY_STORAGE_KEY } from "@/lib/property-storage";
+import { RECOMMENDATION_BADGE_STYLES, RECOMMENDATION_LABELS } from "@/lib/recommendation-presentation";
 import { WEB_EVIDENCE_STORAGE_KEY, loadCachedWebEvidenceForProperties } from "@/lib/web-evidence-storage";
 import { refreshWebEvidenceForProperties } from "@/lib/web-evidence/client";
-import { externalEvidenceCoverage } from "@/lib/web-evidence/merge";
+import { externalEvidenceCoverage, mergeWebEvidenceIntoEngine } from "@/lib/web-evidence/merge";
 import type { BuyerPreferences } from "@/types/buyer-preferences";
 import type { DecisionEngineResult } from "@/types/decision";
 import type { GeoEvidenceByProperty } from "@/types/geo-evidence";
@@ -33,12 +35,6 @@ interface ResultsState {
   geoEvidenceByProperty: GeoEvidenceByProperty;
   webEvidenceByProperty: WebEvidenceByProperty;
 }
-
-const RECOMMENDATION_LABELS = {
-  CONSIDER: "优先考虑",
-  WAIT: "谨慎考虑",
-  PASS: "暂不推荐",
-} as const;
 
 function countUsableGeoEvidence(evidenceByProperty: Parameters<typeof runDecisionEngine>[0]["geoEvidenceByProperty"]): number {
   return Object.values(evidenceByProperty ?? {}).reduce(
@@ -99,12 +95,13 @@ export function DecisionResults() {
       const cachedWebEvidence = loadCachedWebEvidenceForProperties(manualProperties);
       let latestGeoEvidence = { ...cachedGeoEvidence };
       let latestWebEvidence = { ...cachedWebEvidence };
-      const engine = runDecisionEngine({
+      const engine = mergeWebEvidenceIntoEngine(runDecisionEngine({
         properties: manualProperties,
         preferences: preferencesResult.preferences,
         asOfDate,
         geoEvidenceByProperty: cachedGeoEvidence,
-      });
+        webEvidenceByProperty: cachedWebEvidence,
+      }), cachedWebEvidence);
       setState({
         properties: manualProperties,
         preferences: preferencesResult.preferences,
@@ -117,12 +114,13 @@ export function DecisionResults() {
       void refreshGeoEvidenceForProperties(manualProperties, preferencesResult.preferences, (propertyId, evidence) => {
         if (geoController.signal.aborted) return;
         latestGeoEvidence = { ...latestGeoEvidence, [propertyId]: evidence };
-        const progressivelyUpdatedEngine = runDecisionEngine({
+        const progressivelyUpdatedEngine = mergeWebEvidenceIntoEngine(runDecisionEngine({
           properties: manualProperties,
           preferences: preferencesResult.preferences,
           asOfDate,
           geoEvidenceByProperty: latestGeoEvidence,
-        });
+          webEvidenceByProperty: latestWebEvidence,
+        }), latestWebEvidence);
         setState({
           properties: manualProperties,
           preferences: preferencesResult.preferences,
@@ -135,12 +133,13 @@ export function DecisionResults() {
       })
         .then((geoEvidenceByProperty) => {
           if (geoController.signal.aborted) return;
-          const engineWithGeoEvidence = runDecisionEngine({
+          const engineWithGeoEvidence = mergeWebEvidenceIntoEngine(runDecisionEngine({
             properties: manualProperties,
             preferences: preferencesResult.preferences,
             asOfDate,
             geoEvidenceByProperty,
-          });
+            webEvidenceByProperty: latestWebEvidence,
+          }), latestWebEvidence);
           setState({
             properties: manualProperties,
             preferences: preferencesResult.preferences,
@@ -159,7 +158,22 @@ export function DecisionResults() {
       void refreshWebEvidenceForProperties(manualProperties, (propertyId, evidence) => {
         if (geoController.signal.aborted) return;
         latestWebEvidence = { ...latestWebEvidence, [propertyId]: evidence };
-        setState((current) => ({ ...current, webEvidenceByProperty: latestWebEvidence }));
+        const engineWithWebEvidence = mergeWebEvidenceIntoEngine(runDecisionEngine({
+          properties: manualProperties,
+          preferences: preferencesResult.preferences,
+          asOfDate,
+          geoEvidenceByProperty: latestGeoEvidence,
+          webEvidenceByProperty: latestWebEvidence,
+        }), latestWebEvidence);
+        setState({
+          properties: manualProperties,
+          preferences: preferencesResult.preferences,
+          engine: engineWithWebEvidence,
+          message: null,
+          geoEvidenceCount: countUsableGeoEvidence(latestGeoEvidence),
+          geoEvidenceByProperty: latestGeoEvidence,
+          webEvidenceByProperty: latestWebEvidence,
+        });
       }, geoController.signal).catch((error: unknown) => {
         if (!(error instanceof Error && error.name === "AbortError")) {
           // Web evidence is optional; cached and deterministic results remain visible.
@@ -196,6 +210,13 @@ export function DecisionResults() {
         decisionResult: state.engine,
         recommendedPropertyId: topResult?.propertyId ?? null,
         aiOverallSummary: getAIOverallSummary(state.properties, state.preferences, state.engine, state.geoEvidenceByProperty, state.webEvidenceByProperty),
+        decisionReasons: generateDecisionReasons({
+          currentPreferences: state.preferences,
+          preferenceWeights: state.engine.weights,
+          rankedProperties: state.properties,
+          rankedResults: state.engine.results,
+          geoEvidenceByProperty: state.geoEvidenceByProperty,
+        }),
       });
       setSaveStatus("saved");
     } catch {
@@ -225,18 +246,13 @@ export function DecisionResults() {
   const winner = state.engine.results[0];
   const winnerProperty = propertyById.get(winner.propertyId);
   const winnerWebEvidence = state.webEvidenceByProperty[winner.propertyId];
-  const winnerExternalCoverage = externalEvidenceCoverage(winnerWebEvidence);
+  const winnerExternalCoverage = externalEvidenceCoverage(winnerWebEvidence, { educationApplicable: state.preferences?.educationNeed !== "none" });
   const hasInvalidInputs = state.engine.results.some((result) => result.confidence.invalidInputFields.length > 0);
-  const totalWebEvidenceCoverage = Object.values(state.webEvidenceByProperty).reduce(
-    (sum, evidence) => sum + externalEvidenceCoverage(evidence).completed,
-    0,
-  );
-  const alternativeProperty = state.engine.results[1] ? propertyById.get(state.engine.results[1].propertyId) : undefined;
-  const winningReasons = winnerProperty && state.preferences ? buildWinningReasons({
-    property: winnerProperty,
-    result: winner,
-    alternative: alternativeProperty,
-    preferences: state.preferences,
+  const winningReasons = state.preferences ? generateDecisionReasons({
+    currentPreferences: state.preferences,
+    preferenceWeights: state.engine.weights,
+    rankedProperties: state.properties,
+    rankedResults: state.engine.results,
     geoEvidenceByProperty: state.geoEvidenceByProperty,
   }) : [];
   const decisionSummary = buildDecisionSummary(winningReasons);
@@ -259,7 +275,7 @@ export function DecisionResults() {
                 <p className="text-xs font-medium uppercase tracking-[0.18em] text-[#75886d]">当前最适合您的房源</p>
                 <div className="mt-3 flex flex-wrap items-center gap-3">
                   <h2 className="font-serif text-3xl sm:text-4xl">{winnerProperty.name}</h2>
-                  <span className="rounded-full bg-[#e7f1ea] px-3 py-1.5 text-xs font-medium text-[#477056]">{winner.recommendation} · {RECOMMENDATION_LABELS[winner.recommendation]}</span>
+                  <span className={`rounded-full px-3 py-1.5 text-xs font-medium ${RECOMMENDATION_BADGE_STYLES[winner.recommendation]}`}>{winner.recommendation} · {RECOMMENDATION_LABELS[winner.recommendation]}</span>
                 </div>
                 <p className="mt-4 text-base leading-8 text-[#60655e]">“{decisionSummary}”</p>
               </div>
@@ -285,7 +301,9 @@ export function DecisionResults() {
 
       {hasInvalidInputs && <div className="mt-5 flex items-start gap-3 rounded-xl border border-[#e8ddc8] bg-[#fbf7ee] p-4 text-sm leading-6 text-[#78684a]"><AlertTriangle size={18} className="mt-0.5 shrink-0" /><p>部分输入内容较少，未纳入当前分析。补充具体名称可提高可信度。</p></div>}
 
-      {winningReasons.length > 0 && <section className="mt-8"><SectionHeading eyebrow="Decision reasons" title="为什么更适合您" /><div className="mt-4 grid gap-4 md:grid-cols-3">{winningReasons.map((reason, index) => <article key={reason.title} className="card p-5"><span className="grid size-8 place-items-center rounded-full bg-[#eef2eb] text-sm font-semibold text-[#607158]">{index + 1}</span><h3 className="mt-4 font-semibold">{reason.title}</h3><p className="mt-2 text-sm leading-7 text-[#6d706b]">{reason.description}</p></article>)}</div></section>}
+      {state.preferences && <AIAnalysisPanel properties={state.properties} preferences={state.preferences} engine={state.engine} geoEvidenceByProperty={state.geoEvidenceByProperty} webEvidenceByProperty={state.webEvidenceByProperty} />}
+
+      {winningReasons.length > 0 && <section className="mt-8"><SectionHeading eyebrow="Decision reasons" title="为什么更适合您" description="结合您的购房偏好、当前权重和候选房源的实际差异，以下是该房源排名第一的主要原因。" /><div className="mt-4 grid gap-4 md:grid-cols-3">{winningReasons.map((reason, index) => <article key={reason.title} className="card p-5"><div className="flex items-center justify-between gap-3"><span className="grid size-8 place-items-center rounded-full bg-[#eef2eb] text-sm font-semibold text-[#607158]">{index + 1}</span>{reason.label && <span className="rounded-full bg-[#f3f4ef] px-2.5 py-1 text-[10px] font-medium text-[#677360]">{reason.label}</span>}</div><h3 className="mt-4 font-semibold">{reason.title}</h3><p className="mt-2 text-sm leading-7 text-[#6d706b]">{reason.description}</p></article>)}</div></section>}
 
       <section className="mt-8">
         <SectionHeading eyebrow="Quick comparison" title="候选房源快速比较" />
@@ -294,9 +312,7 @@ export function DecisionResults() {
         </div>
       </section>
 
-      {decisionRisks.length > 0 && <section className="card mt-8 p-6 sm:p-8"><SectionHeading eyebrow="Before buying" title="买之前还需要确认" /><div className="mt-5 grid gap-3 md:grid-cols-2">{decisionRisks.map((risk) => <article key={risk.title} className="flex gap-3 rounded-xl bg-[#faf8f3] p-4"><CircleAlert size={18} className="mt-0.5 shrink-0 text-[#8a7046]" /><div><h3 className="text-sm font-semibold">{risk.title}</h3><p className="mt-1 text-xs leading-6 text-[#74766f]">{risk.description}</p></div></article>)}</div></section>}
-
-      {state.preferences && <AIAnalysisPanel properties={state.properties} preferences={state.preferences} engine={state.engine} geoEvidenceByProperty={state.geoEvidenceByProperty} webEvidenceByProperty={state.webEvidenceByProperty} />}
+      {decisionRisks.length > 0 && winnerProperty && <section className="card mt-8 p-6 sm:p-8"><SectionHeading eyebrow="Before buying" title="买之前还需要确认" description="补充这些事实可以提高判断可信度，但不会阻止当前推荐。" /><div className="mt-5 grid gap-3 md:grid-cols-2">{decisionRisks.map((risk) => <article key={risk.title} className="rounded-xl bg-[#faf8f3] p-4"><div className="flex gap-3"><CircleAlert size={18} className="mt-0.5 shrink-0 text-[#8a7046]" /><div><h3 className="text-sm font-semibold">{risk.title}</h3><p className="mt-1 text-xs leading-6 text-[#74766f]">{risk.description}</p><ul className="mt-2 space-y-1 text-xs leading-5 text-[#696c67]">{risk.suggestions.map((suggestion) => <li key={suggestion}>· {suggestion}</li>)}</ul><Button asChild className="mt-3 h-9 bg-white px-3 text-xs text-[#5d7056] ring-1 ring-[#dcdad4] hover:bg-[#f3f4ef]"><Link href={`/properties/new?id=${winnerProperty.id}#${risk.focusTarget}`}>补充信息</Link></Button></div></div></article>)}</div></section>}
 
       <details className="card group mt-7 p-6 sm:p-8">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-4"><div><p className="text-xs font-medium uppercase tracking-[0.16em] text-[#75886d]">Detailed evidence</p><h2 className="mt-1 font-serif text-2xl">查看完整 15 维分析</h2><p className="mt-2 text-xs leading-5 text-[#7b7e78]">按房源查看全部维度、证据来源、权重与仍需确认的信息。</p></div><ChevronDown className="shrink-0 text-[#75886d] transition group-open:rotate-180" /></summary>
@@ -323,13 +339,13 @@ function PriceBlock({ label, value, emphasized = false }: { label: string; value
   return <div className={`rounded-xl border p-4 ${emphasized ? "border-[#cfd8ca] bg-white" : "border-[#e3ded2] bg-[#fbf8f1]"}`}><span className="text-xs text-[#858882]">{label}</span><b className={`mt-1 block font-serif text-2xl ${emphasized ? "text-[#53674d]" : "text-[#655f52]"}`}>{value ?? "未填写"}{value ? <small className="ml-1 text-sm">万</small> : null}</b></div>;
 }
 
-function SectionHeading({ eyebrow, title }: { eyebrow: string; title: string }) {
-  return <div><p className="text-xs font-medium uppercase tracking-[0.16em] text-[#75886d]">{eyebrow}</p><h2 className="mt-1 font-serif text-2xl">{title}</h2></div>;
+function SectionHeading({ eyebrow, title, description }: { eyebrow: string; title: string; description?: string }) {
+  return <div><p className="text-xs font-medium uppercase tracking-[0.16em] text-[#75886d]">{eyebrow}</p><h2 className="mt-1 font-serif text-2xl">{title}</h2>{description && <p className="mt-2 text-xs leading-5 text-[#7b7e78]">{description}</p>}</div>;
 }
 
 function ComparisonCard({ item }: { item: ReturnType<typeof buildQuickComparison>[number] }) {
   const recommendation = RECOMMENDATION_LABELS[item.result.recommendation];
-  return <Link href={`/results/${item.property.id}`} className={`card p-5 transition hover:-translate-y-0.5 ${item.rank === 1 ? "ring-1 ring-[#aebda8]" : ""}`}><div className="flex items-start justify-between gap-3"><div><span className="text-xs font-medium text-[#75886d]">第 {item.rank} 位</span><h3 className="mt-1 text-lg font-semibold">{item.property.name}</h3></div><span className="rounded-full bg-[#f0f2ec] px-3 py-1 text-xs text-[#617359]">{item.result.overallScore ?? "—"}% · {recommendation}</span></div><div className="mt-4 grid grid-cols-2 gap-3 text-xs"><CompactFact label="挂牌价" value={item.property.listingPrice ? `${item.property.listingPrice} 万` : "未填写"} /><CompactFact label="预期成交" value={`${item.property.totalPrice} 万`} /><CompactFact label="面积 / 户型" value={`${item.property.area}㎡ · ${item.property.layout}`} /><CompactFact label="家庭通勤" value={formatCommute(item.primaryCommuteMinutes, item.partnerCommuteMinutes)} /></div><div className="mt-4 space-y-2 border-t border-[#eceae5] pt-4 text-xs leading-5"><p><b className="text-[#607158]">优势：</b>{item.keyAdvantage}</p><p><b className="text-[#8a7046]">待确认：</b>{item.keyRisk}</p></div></Link>;
+  return <Link href={`/results/${item.property.id}`} className={`card p-5 transition hover:-translate-y-0.5 ${item.rank === 1 ? "ring-1 ring-[#aebda8]" : ""}`}><div className="flex items-start justify-between gap-3"><div><span className="text-xs font-medium text-[#75886d]">第 {item.rank} 位</span><h3 className="mt-1 text-lg font-semibold">{item.property.name}</h3></div><span className={`rounded-full px-3 py-1 text-xs font-medium ${RECOMMENDATION_BADGE_STYLES[item.result.recommendation]}`}>{item.result.overallScore ?? "—"}% · {recommendation}</span></div><div className="mt-4 grid grid-cols-2 gap-3 text-xs"><CompactFact label="挂牌价" value={item.property.listingPrice ? `${item.property.listingPrice} 万` : "未填写"} /><CompactFact label="预期成交" value={`${item.property.totalPrice} 万`} /><CompactFact label="面积 / 户型" value={`${item.property.area}㎡ · ${item.property.layout}`} /><CompactFact label="家庭通勤" value={formatCommute(item.primaryCommuteMinutes, item.partnerCommuteMinutes)} /></div><div className="mt-4 space-y-2 border-t border-[#eceae5] pt-4 text-xs leading-5"><p><b className="text-[#607158]">优势：</b>{item.keyAdvantage}</p><p><b className="text-[#8a7046]">待确认：</b>{item.keyRisk}</p></div></Link>;
 }
 
 function CompactFact({ label, value }: { label: string; value: string }) {
@@ -337,8 +353,8 @@ function CompactFact({ label, value }: { label: string; value: string }) {
 }
 
 function formatCommute(primary: number | null, partner: number | null): string {
-  if (primary !== null && partner !== null) return `本人 ${primary} 分 · 伴侣 ${partner} 分`;
-  if (primary !== null) return `本人 ${primary} 分钟`;
-  if (partner !== null) return `伴侣 ${partner} 分钟`;
+  if (primary !== null && partner !== null) return `本人约 ${primary} 分钟 · 伴侣约 ${partner} 分钟`;
+  if (primary !== null) return `本人约 ${primary} 分钟`;
+  if (partner !== null) return `伴侣约 ${partner} 分钟`;
   return "路线仍待确认";
 }

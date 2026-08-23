@@ -10,22 +10,18 @@ import { DIMENSION_LABELS, DIMENSION_TYPE_LABELS, DIMENSION_TYPES } from "@/lib/
 import { runDecisionEngine } from "@/lib/decision/engine";
 import { loadCachedGeoEvidenceForProperties } from "@/lib/geo-evidence-storage";
 import { getProperties } from "@/lib/property-storage";
+import { RECOMMENDATION_BADGE_STYLES, RECOMMENDATION_LABELS } from "@/lib/recommendation-presentation";
 import { loadCachedWebEvidenceForProperties } from "@/lib/web-evidence-storage";
 import { refreshWebEvidenceForProperties } from "@/lib/web-evidence/client";
-import { externalEvidenceCoverageDetails, mergeWebEvidenceIntoEngine } from "@/lib/web-evidence/merge";
-import { WEB_EVIDENCE_TARGET_DIMENSIONS, type WebEvidenceStatus } from "@/lib/web-evidence/types";
+import { externalEvidenceCoverageDetails, externalEvidenceCoverageDimensions, mergeWebEvidenceIntoEngine } from "@/lib/web-evidence/merge";
+import type { WebEvidenceStatus } from "@/lib/web-evidence/types";
 import type { DimensionEvaluation, PropertyDecisionResult } from "@/types/decision";
 import type { Property } from "@/types/property";
 import type { PropertyWebEvidence } from "@/lib/web-evidence/types";
 
 const ANALYSIS_CONFIDENCE_LABELS = { provisional: "阶段性", supported: "较充分" } as const;
-const RECOMMENDATION_LABELS = {
-  CONSIDER: "优先考虑",
-  WAIT: "谨慎考虑",
-  PASS: "暂不推荐",
-} as const;
-
 function dimensionStatusLabel(dimension: DimensionEvaluation, webStatus?: WebEvidenceStatus): string {
+  if (dimension.key === "value_preservation") return dimension.status === "unknown" ? "结构派生 · 证据不足" : "结构派生";
   if (webStatus === "verified") return "公开来源 · 已核验";
   if (webStatus === "partial") return "公开来源 · 部分证据";
   if (dimension.evidence.some((item) => item.source === "amap")) {
@@ -48,6 +44,7 @@ interface DetailState {
   asOfDate: string;
   rankingProvisional: boolean;
   webEvidence: PropertyWebEvidence | null;
+  educationApplicable: boolean;
 }
 
 export function DecisionDetail({ propertyId }: { propertyId: string }) {
@@ -78,6 +75,7 @@ export function DecisionDetail({ propertyId }: { propertyId: string }) {
         preferences: preferences.preferences,
         asOfDate,
         geoEvidenceByProperty: cachedGeoEvidence,
+        webEvidenceByProperty: cachedWebEvidence,
       });
       const engine = mergeWebEvidenceIntoEngine(latestEngine, cachedWebEvidence);
       const result = engine.results.find((item) => item.propertyId === propertyId);
@@ -85,7 +83,7 @@ export function DecisionDetail({ propertyId }: { propertyId: string }) {
         setMessage("该房源没有可用的分析结果。");
         return () => controller.abort();
       }
-      setState({ property, result, asOfDate, rankingProvisional: engine.rankingProvisional, webEvidence: cachedWebEvidence[property.id] ?? null });
+      setState({ property, result, asOfDate, rankingProvisional: engine.rankingProvisional, webEvidence: cachedWebEvidence[property.id] ?? null, educationApplicable: preferences.preferences.educationNeed !== "none" });
       const refreshOrder = [property, ...properties.filter((item) => item.id !== property.id)];
       void refreshGeoEvidenceForProperties(refreshOrder, preferences.preferences, (updatedPropertyId, evidence) => {
         if (controller.signal.aborted) return;
@@ -95,6 +93,7 @@ export function DecisionDetail({ propertyId }: { propertyId: string }) {
           preferences: preferences.preferences,
           asOfDate,
           geoEvidenceByProperty: latestGeoEvidence,
+          webEvidenceByProperty: latestWebEvidence,
         });
         const progressivelyUpdatedEngine = mergeWebEvidenceIntoEngine(latestEngine, latestWebEvidence);
         const progressivelyUpdatedResult = progressivelyUpdatedEngine.results.find((item) => item.propertyId === propertyId);
@@ -104,6 +103,7 @@ export function DecisionDetail({ propertyId }: { propertyId: string }) {
           asOfDate,
           rankingProvisional: progressivelyUpdatedEngine.rankingProvisional,
           webEvidence: latestWebEvidence[property.id] ?? null,
+          educationApplicable: preferences.preferences.educationNeed !== "none",
         });
       })
         .then((geoEvidenceByProperty) => {
@@ -113,6 +113,7 @@ export function DecisionDetail({ propertyId }: { propertyId: string }) {
             preferences: preferences.preferences,
             asOfDate,
             geoEvidenceByProperty,
+            webEvidenceByProperty: latestWebEvidence,
           });
           const engineWithGeoEvidence = mergeWebEvidenceIntoEngine(latestEngine, latestWebEvidence);
           const resultWithGeoEvidence = engineWithGeoEvidence.results.find((item) => item.propertyId === propertyId);
@@ -123,6 +124,7 @@ export function DecisionDetail({ propertyId }: { propertyId: string }) {
               asOfDate,
               rankingProvisional: engineWithGeoEvidence.rankingProvisional,
               webEvidence: latestWebEvidence[property.id] ?? null,
+              educationApplicable: preferences.preferences.educationNeed !== "none",
             });
           }
         })
@@ -134,6 +136,13 @@ export function DecisionDetail({ propertyId }: { propertyId: string }) {
       void refreshWebEvidenceForProperties(properties, (updatedPropertyId, evidence) => {
         if (controller.signal.aborted) return;
         latestWebEvidence = { ...latestWebEvidence, [updatedPropertyId]: evidence };
+        latestEngine = runDecisionEngine({
+          properties,
+          preferences: preferences.preferences,
+          asOfDate,
+          geoEvidenceByProperty: latestGeoEvidence,
+          webEvidenceByProperty: latestWebEvidence,
+        });
         const engineWithWebEvidence = mergeWebEvidenceIntoEngine(latestEngine, latestWebEvidence);
         const updatedResult = engineWithWebEvidence.results.find((item) => item.propertyId === propertyId);
         if (updatedResult) setState({
@@ -142,6 +151,7 @@ export function DecisionDetail({ propertyId }: { propertyId: string }) {
           asOfDate,
           rankingProvisional: engineWithWebEvidence.rankingProvisional,
           webEvidence: latestWebEvidence[property.id] ?? null,
+          educationApplicable: preferences.preferences.educationNeed !== "none",
         });
       }, controller.signal).catch((error: unknown) => {
         if (!(error instanceof Error && error.name === "AbortError")) {
@@ -170,8 +180,10 @@ export function DecisionDetail({ propertyId }: { propertyId: string }) {
   const confirmedEvidence = result.confidence.evidenceItems.filter((item) => item.category === "confirmed");
   const optionalEvidence = result.confidence.evidenceItems.filter((item) => item.category === "optional_confirmation");
   const completeness = result.confidence.dataCompleteness;
-  const coverage = externalEvidenceCoverageDetails(state.webEvidence ?? undefined);
-  const coveredDimensions = state.webEvidence?.dimensions.filter((item) => item.status !== "unavailable" && item.facts.length > 0) ?? [];
+  const coverageOptions = { educationApplicable: state.educationApplicable };
+  const coverage = externalEvidenceCoverageDetails(state.webEvidence ?? undefined, coverageOptions);
+  const coverageDimensions = externalEvidenceCoverageDimensions(coverageOptions);
+  const coveredDimensions = state.webEvidence?.dimensions.filter((item) => coverageDimensions.includes(item.dimensionKey) && item.status !== "unavailable" && item.facts.length > 0) ?? [];
   return (
     <main className="page">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -182,7 +194,7 @@ export function DecisionDetail({ propertyId }: { propertyId: string }) {
       <section className="card mt-6 p-6 sm:p-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <div className="flex flex-wrap items-center gap-3"><h2 className="text-2xl font-semibold">{property.name}</h2><span className="rounded-full bg-[#f5f0e5] px-4 py-2 text-xs font-medium text-[#806b3e]">{result.recommendation} · {RECOMMENDATION_LABELS[result.recommendation]}</span>{state.rankingProvisional && <span className="rounded-full bg-[#efeee9] px-4 py-2 text-xs">阶段性排序</span>}</div>
+            <div className="flex flex-wrap items-center gap-3"><h2 className="text-2xl font-semibold">{property.name}</h2><span className={`rounded-full px-4 py-2 text-xs font-medium ${RECOMMENDATION_BADGE_STYLES[result.recommendation]}`}>{result.recommendation} · {RECOMMENDATION_LABELS[result.recommendation]}</span>{state.rankingProvisional && <span className="rounded-full bg-[#efeee9] px-4 py-2 text-xs">阶段性排序</span>}</div>
             <p className="mt-3 text-sm text-[#727570]">{property.city} · {property.district} · {property.address}</p>
             <p className="mt-3 text-sm text-[#555]">{property.area}㎡ · {property.layout} · {property.floor} · 预期成交价 {property.totalPrice} 万{property.listingPrice ? ` · 挂牌价 ${property.listingPrice} 万` : ""}</p>
           </div>
@@ -220,14 +232,14 @@ export function DecisionDetail({ propertyId }: { propertyId: string }) {
           {result.dimensions.map((dimension) => {
             const webDimension = state.webEvidence?.dimensions.find((item) => item.dimensionKey === dimension.key);
             const hasWebEvidence = Boolean(webDimension && webDimension.status !== "unavailable" && webDimension.facts.length > 0);
-            const isWebTarget = WEB_EVIDENCE_TARGET_DIMENSIONS.includes(dimension.key as never);
+            const isWebTarget = coverageDimensions.includes(dimension.key as never);
             return <article key={dimension.key} className="rounded-xl border border-[#e8e6e0] p-4">
-              <div className="flex items-center justify-between gap-4"><div><h3 className="font-medium">{DIMENSION_LABELS[dimension.key]}</h3><p className="mt-1 text-[11px] text-[#93948f]">{dimension.evidence.some((item) => item.source === "amap") ? "高德地图证据" : dimension.evidence.some((item) => item.source === "web") ? "公开来源证据" : DIMENSION_TYPE_LABELS[DIMENSION_TYPES[dimension.key]]} · 最终权重 {dimension.finalWeight.toFixed(1)}%</p></div><div className="text-right"><b className="text-xl text-[#617359]">{dimension.score ?? "—"}</b><span className="ml-2 rounded-full bg-[#f1f0eb] px-2 py-1 text-[10px] text-[#737570]">{dimensionStatusLabel(dimension, webDimension?.status)}</span></div></div>
+              <div className="flex items-center justify-between gap-4"><div><h3 className="font-medium">{DIMENSION_LABELS[dimension.key]}</h3><p className="mt-1 text-[11px] text-[#93948f]">{dimension.key === "value_preservation" ? "结构派生" : dimension.evidence.some((item) => item.source === "amap") ? "高德地图证据" : dimension.evidence.some((item) => item.source === "web") ? "公开来源证据" : DIMENSION_TYPE_LABELS[DIMENSION_TYPES[dimension.key]]} · 最终权重 {dimension.finalWeight.toFixed(1)}%</p></div><div className="text-right"><b className="text-xl text-[#617359]">{dimension.score ?? "—"}</b><span className="ml-2 rounded-full bg-[#f1f0eb] px-2 py-1 text-[10px] text-[#737570]">{dimensionStatusLabel(dimension, webDimension?.status)}</span></div></div>
               {dimension.score !== null && <div className="progress mt-3"><span style={{ width: `${dimension.score}%` }} /></div>}
               {dimension.evidence.length > 0 && <ul className="mt-3 space-y-1 text-xs leading-5 text-[#6f726d]">{dimension.evidence.map((item) => <li key={`${item.source}-${item.description}`} className="flex gap-2"><CheckCircle2 size={13} className="mt-1 shrink-0 text-[#75886d]" />{item.description}</li>)}</ul>}
               {hasWebEvidence && webDimension && <details className="mt-3 text-xs text-[#617359]"><summary className="w-fit cursor-pointer select-none font-medium">查看来源 →</summary><ul className="mt-2 space-y-2 rounded-lg bg-[#f7f8f5] p-3 text-[#6f726d]">{webDimension.facts.slice(0, 2).map((fact) => <li key={fact.sourceUrl} className="leading-5"><a href={fact.sourceUrl} target="_blank" rel="noreferrer" className="font-medium text-[#617359] underline decoration-[#bdc7b8] underline-offset-2">{conciseSourceTitle(fact.sourceTitle)}</a><span className="block text-[10px] text-[#92948f]">{fact.sourceDomain ?? "公开来源"}{fact.publishedAt ? ` · ${fact.publishedAt.slice(0, 10)}` : ""}</span></li>)}</ul></details>}
-              {!hasWebEvidence && isWebTarget && <p className="mt-3 flex items-start gap-2 text-xs leading-5 text-[#8a7046]"><HelpCircle size={13} className="mt-1 shrink-0" />当前暂无可用公开来源，仍需进一步核验。</p>}
-              {!isWebTarget && dimension.missingInputs.length > 0 && <p className="mt-3 flex items-start gap-2 text-xs leading-5 text-[#8a7046]"><HelpCircle size={13} className="mt-1 shrink-0" />{dimension.evidence.some((item) => item.source === "amap") || DIMENSION_TYPES[dimension.key] !== "ai" ? "可进一步确认" : "AI分析"}：{dimension.missingInputs.join("、")}</p>}
+              {!hasWebEvidence && isWebTarget && !(dimension.status === "known" && dimension.missingInputs.length === 0) && <p className="mt-3 flex items-start gap-2 text-xs leading-5 text-[#8a7046]"><HelpCircle size={13} className="mt-1 shrink-0" />当前暂无可用公开来源，仍需进一步核验。</p>}
+              {!isWebTarget && dimension.missingInputs.length > 0 && <p className="mt-3 flex items-start gap-2 text-xs leading-5 text-[#8a7046]"><HelpCircle size={13} className="mt-1 shrink-0" />{dimension.key === "value_preservation" || dimension.evidence.some((item) => item.source === "amap") || DIMENSION_TYPES[dimension.key] !== "ai" ? "可进一步确认" : "AI分析"}：{dimension.missingInputs.join("、")}</p>}
             </article>;
           })}
         </div>

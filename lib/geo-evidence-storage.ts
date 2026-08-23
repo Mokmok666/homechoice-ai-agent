@@ -17,7 +17,7 @@ import {
 
 export const GEO_EVIDENCE_STORAGE_KEY = "homechoice.geo-evidence.v1";
 export const GEO_EVIDENCE_SCHEMA_VERSION = 1 as const;
-export const GEO_EVIDENCE_QUALITY_POLICY_VERSION = 2 as const;
+export const GEO_EVIDENCE_QUALITY_POLICY_VERSION = 3 as const;
 export const NEARBY_EVIDENCE_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 export const COMMUTE_EVIDENCE_TTL_MS = 24 * 60 * 60 * 1_000;
 
@@ -179,8 +179,15 @@ function isCommutePersonEvidence(value: unknown): value is CommutePersonEvidence
 }
 
 function isPublicTransportEvidence(value: unknown): value is PublicTransportGeoEvidence {
-  return isBaseEvidence(value, "public_transport") && typeof value.nearestStationName === "string" &&
-    isNonNegativeInteger(value.nearestDistanceMeters) && isNonNegativeInteger(value.stationCountWithin1000m);
+  if (!isBaseEvidence(value, "public_transport")) return false;
+  const metroValid = value.nearestStationName === undefined || (typeof value.nearestStationName === "string" && isNonNegativeInteger(value.nearestDistanceMeters));
+  const metroCountValid = value.stationCountWithin1000m === undefined || isNonNegativeInteger(value.stationCountWithin1000m);
+  const busAvailableValid = value.busEvidenceAvailable === undefined || typeof value.busEvidenceAvailable === "boolean";
+  const busNearestValid = value.nearestBusStopName === undefined || (typeof value.nearestBusStopName === "string" && isNonNegativeInteger(value.nearestBusStopDistanceMeters));
+  const busCountsValid = (value.busStopCountWithin500m === undefined || isNonNegativeInteger(value.busStopCountWithin500m)) &&
+    (value.busStopCountWithin800m === undefined || isNonNegativeInteger(value.busStopCountWithin800m));
+  return metroValid && metroCountValid && busAvailableValid && busNearestValid && busCountsValid &&
+    (value.nearestStationName !== undefined || value.busEvidenceAvailable === true);
 }
 
 function isCommercialEvidence(value: unknown): value is CommercialAmenitiesGeoEvidence {

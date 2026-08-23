@@ -20,6 +20,17 @@ export interface AIPropertyContext {
   deliveryYear: number | null;
   schoolInformation: string | null;
   propertyManagementInformation: string | null;
+  supplementalInformation: {
+    propertyCompany: string | null;
+    propertyFee: number | null;
+    propertyExperience: string | null;
+    environment: string | null;
+    noise: string | null;
+    parking: string | null;
+    publicArea: string | null;
+    actualCommuteExperience: string | null;
+    recentDealPrice: number | null;
+  };
   comparableTransactions: AIComparableTransactionContext[];
 }
 
@@ -79,7 +90,16 @@ export interface AIGeoEvidenceContext {
   source: "amap";
   quality: GeoEvidenceQuality;
   status: GeoEvidenceStatus;
-  publicTransport: { nearestStationName: string; nearestDistanceMeters: number; stationCountWithin1000m: number } | null;
+  publicTransport: {
+    nearestStationName: string | null;
+    nearestDistanceMeters: number | null;
+    stationCountWithin1000m: number | null;
+    busEvidenceAvailable: boolean;
+    nearestBusStopName: string | null;
+    nearestBusStopDistanceMeters: number | null;
+    busStopCountWithin500m: number | null;
+    busStopCountWithin800m: number | null;
+  } | null;
   commercial: { countWithin1000m: number; hasMajorDestination: boolean; examples: string[] } | null;
   dailyLife: { supermarketCount: number; medicalCount: number; parkCount: number; examples: string[] } | null;
   commute: {

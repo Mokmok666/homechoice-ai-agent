@@ -32,7 +32,7 @@ export function createPropertyIdentitySignature(identity: WebEvidencePropertyIde
   const stableIdentity = identity.poiId
     ? ["poi", identity.poiId, identity.city, identity.district, identity.name]
     : ["location", identity.lng ?? null, identity.lat ?? null, identity.city, identity.district, identity.name];
-  return `web-v1-${hash(JSON.stringify(stableIdentity))}`;
+  return `web-v2-${hash(JSON.stringify(stableIdentity))}`;
 }
 
 export function buildPropertyWebQueries(identity: WebEvidencePropertyIdentity): WebEvidenceQuery[] {
@@ -41,9 +41,10 @@ export function buildPropertyWebQueries(identity: WebEvidencePropertyIdentity): 
     { dimensionKey: "location_maturity", query: `${base} 板块 规划 周边配套` },
     { dimensionKey: "location_maturity", query: `${base} 区域发展 交通 公共服务` },
     { dimensionKey: "community_quality", query: `${base} 小区品质 开发商 项目交付` },
-    { dimensionKey: "property_management", query: `${base} 物业公司 物业服务` },
+    { dimensionKey: "property_management", query: `${base} 物业公司 物业服务 维护 投诉` },
+    { dimensionKey: "education", query: `${base} 招生范围 对口学校 教育局` },
     { dimensionKey: "transaction_price_reasonableness", query: `${base} 二手房 成交 成交价` },
-    { dimensionKey: "liquidity", query: `${base} 二手房 挂牌 成交 近一年` },
-    { dimensionKey: "value_preservation", query: `${base} 板块规划 产业 交通 区域发展` },
+    { dimensionKey: "liquidity", query: `${base} 二手房 真实成交 成交周期 近一年` },
+    { dimensionKey: "value_preservation", query: `${base} 已建成 产业 交通 真实成交 区域现状` },
   ];
 }

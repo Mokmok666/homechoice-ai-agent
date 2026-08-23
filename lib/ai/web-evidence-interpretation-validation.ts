@@ -10,7 +10,7 @@ import {
 } from "@/lib/web-evidence/types";
 
 export type WebInterpretationValidationResult<T> = { success: true; data: T } | { success: false; errors: string[] };
-const FORBIDDEN_LANGUAGE = /根据模型|AI认为|我认为|综合评分|评分为|排名第一|建议购买|推荐购买|一定升值|必然升值|保证升值|稳赚/i;
+const FORBIDDEN_LANGUAGE = /根据模型|AI认为|我认为|综合评分|评分为|排名第一|建议购买|推荐购买|一定升值|必然升值|保证升值|稳赚|保证入学|入学有保障/i;
 const DIMENSION_OVERCLAIM_LANGUAGE = /保值能力强|物业好|物业服务较好|服务良好|品质优秀/i;
 const CAUTIOUS_LANGUAGE = /现有|目前|初步|仍|但|暂|有限|不足|尚|显示|资料/;
 const STRONG_POSITIVE_LANGUAGE = /很好|较好|良好|优秀|成熟度高|十分成熟|流动性强|流动性好|成交活跃|保值能力强|长期价值高/;
@@ -19,6 +19,7 @@ const INSUFFICIENT_CONCLUSIONS: Record<WebEvidenceDimensionKey, string> = {
   location_maturity: "现有公开资料不足以判断该片区当前成熟度。",
   community_quality: "当前缺少足够项目级公开证据，暂无法判断小区实际品质。",
   property_management: "当前公开资料不足以判断该小区物业服务水平。",
+  education: "当前缺少有效的官方招生范围证据，暂无法确认房源与学校的入学关系。",
   transaction_price_reasonableness: "当前缺少足够真实成交样本，暂无法判断该价格是否处于合理区间。",
   liquidity: "当前缺少足够真实成交和市场活跃度证据，暂无法判断该房源流动性。",
   value_preservation: "当前证据不足以判断该房源的长期价值稳定性。",
@@ -41,6 +42,10 @@ function classifyFact(dimensionKey: WebEvidenceDimensionKey, claim: string, tran
       if (/物业类型|住宅物业|商业物业|物业为住宅|物业为商业|建筑类型|产权类型|板楼|塔楼|开发商/.test(text) && !/物业公司|物业管理|物业服务|物业费|投诉|服务记录/.test(text)) return "IRRELEVANT";
       if (/物业服务|物业费|服务范围|服务记录|投诉|业主反馈|住户反馈|物业管理质量/.test(text)) return "DIRECT";
       return /物业公司|物业管理公司|管理主体|物业为|物业：/.test(text) ? "PARTIAL" : "IRRELEVANT";
+    case "education":
+      if (/开发商|中介|学区房|名校旁|名校附近/.test(text) && !/教育局|政府|招生范围|服务范围|划片|对口/.test(text)) return "IRRELEVANT";
+      if (/教育局|政府|招生范围|服务范围|划片|对口|入学范围/.test(text)) return "DIRECT";
+      return /学校|教育|学区/.test(text) ? "PARTIAL" : "IRRELEVANT";
     case "transaction_price_reasonableness":
       if (transactionKind === "listing" || /挂牌|在售|报价|售价|营销价格/.test(text) && !/成交|网签/.test(text)) return "IRRELEVANT";
       return transactionKind === "transaction" || /成交|网签/.test(text) ? "DIRECT" : "IRRELEVANT";
@@ -65,6 +70,7 @@ function requiresInsufficientFallback(dimensionKey: WebEvidenceDimensionKey, rel
   if (relevant.length === 0) return true;
   const directCount = relevant.filter((item) => item.relevance === "DIRECT").length;
   if (dimensionKey === "location_maturity" || dimensionKey === "community_quality" || dimensionKey === "value_preservation") return directCount === 0;
+  if (dimensionKey === "education") return directCount === 0;
   if (dimensionKey === "transaction_price_reasonableness") return directCount < 3;
   if (dimensionKey === "liquidity") return directCount === 0 && relevant.length < 2;
   return false;

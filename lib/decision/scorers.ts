@@ -12,8 +12,10 @@ import {
 } from "../../types/decision";
 import type { ComparableTransaction, Property } from "../../types/property";
 import type { GeoEvidenceQuality, PropertyGeoEvidence } from "../../types/geo-evidence";
+import type { DimensionWebEvidence, PropertyWebEvidence, WebEvidenceFact } from "../web-evidence/types";
+import { normalizePropertyName } from "../web-evidence/relevance";
 import { validateMetroDistance, validateTextField } from "./dataQuality";
-import { AI_DIMENSIONS, BASE_WEIGHTS } from "./dimensions";
+import { AI_DIMENSIONS, BASE_WEIGHTS, DIMENSION_LABELS } from "./dimensions";
 
 interface ScoringContext {
   property: Property;
@@ -21,6 +23,7 @@ interface ScoringContext {
   asOfDate: string;
   weights: Record<DimensionKey, number>;
   geoEvidence?: PropertyGeoEvidence;
+  webEvidence?: PropertyWebEvidence;
 }
 
 function clamp(value: number, min = 0, max = 100): number {
@@ -111,29 +114,65 @@ export function scorePublicTransport(context: ScoringContext): DimensionEvaluati
   const geo = context.geoEvidence?.public_transport;
   if (isUsableGeoEvidence(geo)) {
     const distance = geo.nearestDistanceMeters;
-    const baseScore = distance <= 500 ? 100 : distance <= 800 ? 90 : distance <= 1200 ? 75 : distance <= 2000 ? 50 : 20;
-    const score = Math.min(100, baseScore + (geo.stationCountWithin1000m >= 2 ? 5 : 0));
+    const busAvailable = geo.busEvidenceAvailable === true;
+    const busDistance = geo.nearestBusStopDistanceMeters;
+    const busCount500 = geo.busStopCountWithin500m ?? 0;
+    const busCount800 = geo.busStopCountWithin800m ?? 0;
+    const metroScore = distance === undefined ? null : distance <= 800 ? 100 : distance <= 1200 ? 80 : distance <= 1500 ? 60 : 20;
+    const busScore = !busAvailable ? null
+      : busDistance === undefined ? 20
+        : busDistance <= 300 && busCount500 >= 3 && busCount800 >= 5 ? 85
+          : busDistance <= 300 && busCount500 >= 1 ? 80
+            : busDistance <= 500 ? 70
+              : busDistance <= 800 ? 50 : 30;
+    // Metro is the strongest signal. Strong bus coverage can compensate for a distant metro,
+    // but a missing bus request never becomes a fabricated bus penalty.
+    const score = metroScore === null
+      ? busScore
+      : distance! <= 800 ? 100
+        : distance! <= 1200 ? Math.max(metroScore, busScore ?? 0)
+          : distance! <= 1500 ? Math.max(metroScore, busScore ?? 0)
+            : busScore === null ? null : Math.min(80, busScore);
+    if (score === null) {
+      return partial(
+        context,
+        "public_transport",
+        [{ source: "amap", quality: geoEvidenceQuality(geo.quality), description: `${geo.observation}。来源：高德地图` }],
+        ["最近地铁距离较远，公交覆盖证据暂不可用"],
+      );
+    }
     return evaluation(context, "public_transport", {
       score,
       status: "partial",
       evidence: [{
         source: "amap",
         quality: geoEvidenceQuality(geo.quality),
-        description: `${geo.observation}；1 公里内主站 ${geo.stationCountWithin1000m} 个。来源：高德地图`,
+        description: `${geo.observation}。来源：高德地图`,
       }],
-      missingInputs: ["当前为直线距离，不代表实际步行距离"],
+      missingInputs: [
+        "当前站点距离为直线距离，不代表实际步行距离",
+        ...(!busAvailable ? ["公交覆盖证据暂不可用"] : []),
+      ],
     });
   }
   if (property.source !== "manual" || property.metroDistance === null || validateMetroDistance(property.metroDistance).status !== "valid") {
-    return unknown(context, "public_transport", ["到最近轨道交通站的距离"]);
+    return unknown(context, "public_transport", ["地铁或公交可达性证据"]);
   }
   const distance = property.metroDistance;
-  const score = distance <= 500 ? 100 : distance <= 800 ? 85 : distance <= 1200 ? 70 : distance <= 2000 ? 50 : 30;
+  if (distance > 1500) {
+    return partial(
+      context,
+      "public_transport",
+      [{ source: "manual", quality: 0.7, description: `距最近地铁站约 ${distance} 米，已超出通常步行可达范围` }],
+      ["公交站距离与覆盖情况"],
+    );
+  }
+  const score = distance <= 800 ? 100 : distance <= 1200 ? 80 : 60;
   return evaluation(context, "public_transport", {
     score,
     status: "partial",
     evidence: [{ source: "manual", quality: 0.8, description: `距最近地铁站约 ${distance} 米` }],
-    missingInputs: ["真实步行路径与站点服务能力"],
+    missingInputs: ["真实步行路径、站点服务能力与公交覆盖"],
   });
 }
 
@@ -336,7 +375,7 @@ export function scoreTransactionPriceReasonableness(context: ScoringContext): Di
     }];
     return evaluation(context, "transaction_price_reasonableness", {
       score: null,
-      status: "known",
+      status: "partial",
       evidence,
       missingInputs: ["增加至 3 条近 24 个月已确认记录可计算价格合理性"],
     });
@@ -362,6 +401,147 @@ export function scoreTransactionPriceReasonableness(context: ScoringContext): Di
       description: `基于 ${valid.length} 条近 24 个月已确认成交参考的单价中位数`,
     }],
     missingInputs: [],
+  });
+}
+
+function webDimension(context: ScoringContext, key: DimensionKey): DimensionWebEvidence | undefined {
+  return context.webEvidence?.dimensions.find((dimension) => dimension.dimensionKey === key);
+}
+
+function factText(fact: WebEvidenceFact): string {
+  return `${fact.sourceTitle} ${fact.claim}`;
+}
+
+function isProjectSpecificFact(property: Property, fact: WebEvidenceFact): boolean {
+  const name = normalizePropertyName(property.confirmedLocation?.name ?? property.name);
+  return name.length >= 2 && normalizePropertyName(factText(fact)).includes(name);
+}
+
+function hasCredibleSupport(facts: WebEvidenceFact[]): boolean {
+  if (facts.some((fact) => fact.confidence === "high")) return true;
+  return new Set(facts.filter((fact) => fact.confidence === "medium").map((fact) => fact.sourceDomain ?? fact.sourceUrl)).size >= 2;
+}
+
+export function scoreEducation(context: ScoringContext): DimensionEvaluation {
+  const { property, preferences } = context;
+  const hasSchool = validateTextField(property.schoolInformation).status === "valid";
+  if (preferences.educationNeed === "none") {
+    return evaluation(context, "education", {
+      score: null,
+      status: "known",
+      evidence: [
+        { source: "buyer_preference", quality: 1, description: "家庭当前未将教育资源作为购房约束" },
+        ...(hasSchool ? [{ source: "manual" as const, quality: 0.7, description: `已记录学校线索：${property.schoolInformation}，仅作信息展示` }] : []),
+      ],
+      missingInputs: [],
+    });
+  }
+
+  const web = webDimension(context, "education");
+  const officialRelationshipFacts = (web?.facts ?? []).filter((fact) =>
+    fact.confidence === "high" &&
+    isProjectSpecificFact(property, fact) &&
+    /招生范围|服务范围|对口|划片|学区范围|入学范围/.test(factText(fact)),
+  );
+  const evidence: DecisionEvidence[] = [
+    { source: "buyer_preference", quality: 1, description: `家庭${preferences.educationNeed === "current" ? "当前" : "未来"}有教育需求` },
+    ...(hasSchool ? [{ source: "manual" as const, quality: 0.7, description: `用户关注学校：${property.schoolInformation}` }] : []),
+  ];
+  if (officialRelationshipFacts.length > 0) {
+    return evaluation(context, "education", {
+      // This score represents an official relationship signal, never guaranteed admission.
+      score: 80,
+      status: "partial",
+      evidence: [
+        ...evidence,
+        { source: "web", quality: 0.9, description: "官方公开信息显示房源与所关注教育服务范围存在关联；具体资格仍以当年政策为准" },
+      ],
+      missingInputs: ["当年招生政策、户籍房产条件与实际入学资格"],
+    });
+  }
+  return partial(
+    context,
+    "education",
+    evidence,
+    [hasSchool ? "学校关系仍需当前官方招生政策核验" : "可记录关注学校，并以官方招生政策核验房源关系"],
+  );
+}
+
+const PROJECT_SERVICE_SCORES = { positive: 75, mixed: 55, negative: 35 } as const;
+
+export function scorePropertyManagement(context: ScoringContext): DimensionEvaluation {
+  const { property } = context;
+  const managementKnown = validateTextField(property.propertyManagementInformation).status === "valid";
+  const manualEvidence: DecisionEvidence[] = managementKnown
+    ? [{ source: "manual", quality: 0.75, description: `已记录管理主体：${property.propertyManagementInformation}` }]
+    : [];
+  const web = webDimension(context, "property_management");
+  const performanceFacts = (web?.facts ?? []).filter((fact) =>
+    fact.confidence !== "low" &&
+    isProjectSpecificFact(property, fact) &&
+    /物业服务|物业管理|维修|维护|保洁|安保|投诉|响应|公共区域|公区|服务体验/.test(factText(fact)),
+  );
+  if (!hasCredibleSupport(performanceFacts)) {
+    return managementKnown
+      ? partial(context, "property_management", manualEvidence, ["项目级物业服务、维护与真实体验证据"])
+      : unknown(context, "property_management", ["物业管理主体与项目级服务证据"]);
+  }
+  const text = performanceFacts.map(factText).join(" ");
+  const positive = /维护良好|服务良好|响应及时|满意|规范服务|示范项目|优秀服务|品质服务/.test(text);
+  const negative = /投诉|维权|服务差|管理混乱|失修|维修不及时|卫生差|乱收费|纠纷/.test(text);
+  if (!positive && !negative) {
+    return partial(
+      context,
+      "property_management",
+      [...manualEvidence, { source: "web", quality: 0.75, description: "已有项目级物业服务资料，但不足以判断实际服务表现" }],
+      ["稳定的项目服务评价与维护记录"],
+    );
+  }
+  const score = positive && negative ? PROJECT_SERVICE_SCORES.mixed : positive ? PROJECT_SERVICE_SCORES.positive : PROJECT_SERVICE_SCORES.negative;
+  return evaluation(context, "property_management", {
+    score,
+    status: "partial",
+    evidence: [
+      ...manualEvidence,
+      { source: "web", quality: 0.8, description: positive && negative ? "可信项目级资料同时存在正向服务记录与投诉线索" : positive ? "可信项目级资料包含明确的服务或维护正向记录" : "可信项目级资料包含明确的服务投诉或维护风险线索" },
+    ],
+    missingInputs: ["仍建议通过现场公区状态、收费标准与住户体验交叉核验"],
+  });
+}
+
+const VALUE_PRESERVATION_COMPONENTS = [
+  "location_maturity",
+  "public_transport",
+  "commercial_amenities",
+  "liquidity",
+  "building_age",
+  "community_quality",
+] as const satisfies readonly DimensionKey[];
+const MIN_VALUE_COMPONENTS = 3;
+const MIN_VALUE_COMPONENT_BASE_WEIGHT = 15;
+
+export function scoreValuePreservation(
+  context: ScoringContext,
+  evaluated: DimensionEvaluation[],
+): DimensionEvaluation {
+  const components = VALUE_PRESERVATION_COMPONENTS.flatMap((key) => {
+    const item = evaluated.find((dimension) => dimension.key === key);
+    return item?.score === null || item?.score === undefined ? [] : [item];
+  });
+  const componentWeight = components.reduce((sum, item) => sum + item.baseWeight, 0);
+  if (components.length < MIN_VALUE_COMPONENTS || componentWeight < MIN_VALUE_COMPONENT_BASE_WEIGHT) {
+    return unknown(context, "value_preservation", [`至少 ${MIN_VALUE_COMPONENTS} 项、合计基础权重不少于 ${MIN_VALUE_COMPONENT_BASE_WEIGHT} 的结构性维度评分`]);
+  }
+  const score = Math.round(components.reduce((sum, item) => sum + (item.score ?? 0) * item.baseWeight, 0) / componentWeight);
+  return evaluation(context, "value_preservation", {
+    score,
+    status: components.every((item) => item.status === "known") ? "known" : "partial",
+    evidence: [{
+      source: "derived",
+      quality: components.reduce((sum, item) => sum + item.evidenceQuality, 0) / components.length,
+      description: `由 ${components.map((item) => `${DIMENSION_LABELS[item.key]} ${item.score}分`).join("、")} 的结构性评分加权派生；不代表房价上涨预测`,
+    }],
+    missingInputs: components.length < VALUE_PRESERVATION_COMPONENTS.length ? ["更多地段、交通、流动性、楼龄或小区品质证据可提高稳定性判断"] : [],
   });
 }
 
@@ -436,7 +616,7 @@ function scoreUnscoredDimension(context: ScoringContext, key: DimensionKey): Dim
   const missing: Record<DimensionKey, string> = {
     location_maturity: "成熟度相关结构化配套证据",
     commute: "真实通勤时间",
-    public_transport: "轨道交通证据",
+    public_transport: "公共交通证据",
     commercial_amenities: "商业配套证据",
     education: "学校信息",
     daily_life_amenities: "日常生活配套证据",
@@ -454,14 +634,21 @@ function scoreUnscoredDimension(context: ScoringContext, key: DimensionKey): Dim
 }
 
 export function evaluateDimensions(context: ScoringContext): DimensionEvaluation[] {
-  return DIMENSION_KEYS.map((key) => {
-    if (key === "budget_match") return scoreBudgetMatch(context);
-    if (key === "commute") return scoreCommute(context);
-    if (key === "public_transport") return scorePublicTransport(context);
-    if (key === "commercial_amenities") return scoreCommercialAmenities(context);
-    if (key === "daily_life_amenities") return scoreDailyLifeAmenities(context);
-    if (key === "building_age") return scoreBuildingAge(context);
-    if (key === "transaction_price_reasonableness") return scoreTransactionPriceReasonableness(context);
-    return scoreUnscoredDimension(context, key);
-  });
+  const evaluated: DimensionEvaluation[] = [];
+  for (const key of DIMENSION_KEYS) {
+    let result: DimensionEvaluation;
+    if (key === "budget_match") result = scoreBudgetMatch(context);
+    else if (key === "commute") result = scoreCommute(context);
+    else if (key === "public_transport") result = scorePublicTransport(context);
+    else if (key === "commercial_amenities") result = scoreCommercialAmenities(context);
+    else if (key === "daily_life_amenities") result = scoreDailyLifeAmenities(context);
+    else if (key === "building_age") result = scoreBuildingAge(context);
+    else if (key === "transaction_price_reasonableness") result = scoreTransactionPriceReasonableness(context);
+    else if (key === "education") result = scoreEducation(context);
+    else if (key === "property_management") result = scorePropertyManagement(context);
+    else if (key === "value_preservation") result = scoreValuePreservation(context, evaluated);
+    else result = scoreUnscoredDimension(context, key);
+    evaluated.push(result);
+  }
+  return evaluated;
 }

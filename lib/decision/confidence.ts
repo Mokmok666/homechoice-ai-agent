@@ -21,7 +21,7 @@ export function calculateConfidence(
   geoEvidence?: PropertyGeoEvidence,
 ): ConfidenceResult {
   const currentPhaseDimensions = dimensions.filter(
-    (dimension) => DIMENSION_TYPES[dimension.key] !== "ai" || dimension.evidence.some((item) => item.source === "amap"),
+    (dimension) => DIMENSION_TYPES[dimension.key] !== "ai" || dimension.score !== null || dimension.evidence.some((item) => item.source === "amap" || item.source === "web" || item.source === "derived"),
   );
   const eligibleWeight = currentPhaseDimensions.reduce((sum, dimension) => sum + dimension.finalWeight, 0);
   const coveredWeight = currentPhaseDimensions.reduce(
@@ -40,7 +40,7 @@ export function calculateConfidence(
   const improvementInputs = unique(evidenceItems.filter((item) => item.category === "optional_confirmation").map((item) => item.title));
   const aiDimensions = dimensions.filter((dimension) => DIMENSION_TYPES[dimension.key] === "ai");
   const completedAIDimensions = aiDimensions.filter(
-    (dimension) => dimension.status !== "unknown" && dimension.evidence.some((item) => item.source !== "amap"),
+    (dimension) => dimension.status !== "unknown" && dimension.evidence.some((item) => item.source === "web" || item.source === "derived"),
   ).length;
   const aiAnalysisProgress = {
     completed: completedAIDimensions,

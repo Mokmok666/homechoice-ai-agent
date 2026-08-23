@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
-import { ArrowLeft, Building2, Plus, School, TrainFront, Trash2 } from "lucide-react";
+import { ArrowLeft, Building2, Plus, School, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -55,6 +55,19 @@ const ORIENTATION_OPTIONS: Array<{ value: Orientation; label: string }> = [
   { value: "other", label: "其他" },
 ];
 
+const PROPERTY_MANAGEMENT_OPTIONS = [
+  "中海物业",
+  "保利物业",
+  "招商积余 / 招商物业",
+  "华润万象生活",
+  "万物云",
+  "龙湖智创生活",
+  "绿城服务",
+  "金地智慧服务",
+  "碧桂园服务",
+  "雅生活",
+] as const;
+
 const SELECT_CLASS = "mt-2 h-12 w-full rounded-lg border border-[#deddd8] bg-white px-4 text-sm outline-none focus:border-[#7d8f75] focus:ring-2 focus:ring-[#7d8f75]/10";
 
 interface ComparableFormRow {
@@ -81,6 +94,14 @@ interface PropertyFormState {
   metroDistance: string;
   schoolInformation: string;
   propertyManagementInformation: string;
+  propertyFee: string;
+  propertyExperience: string;
+  environment: string;
+  noise: string;
+  parking: string;
+  publicArea: string;
+  actualCommuteExperience: string;
+  recentDealPrice: string;
   listingPrice: string;
   deliveryYear: string;
   orientation: string;
@@ -107,6 +128,14 @@ const EMPTY_FORM: PropertyFormState = {
   metroDistance: "",
   schoolInformation: "",
   propertyManagementInformation: "",
+  propertyFee: "",
+  propertyExperience: "",
+  environment: "",
+  noise: "",
+  parking: "",
+  publicArea: "",
+  actualCommuteExperience: "",
+  recentDealPrice: "",
   listingPrice: "",
   deliveryYear: "",
   orientation: "",
@@ -171,6 +200,14 @@ function validateForm(form: PropertyFormState): FormErrors {
   if (form.listingPrice.trim()) {
     const listingPrice = Number(form.listingPrice);
     if (!Number.isFinite(listingPrice) || listingPrice <= 0) errors.listingPrice = "挂牌价必须是大于 0 的数字。";
+  }
+  if (form.propertyFee.trim()) {
+    const propertyFee = Number(form.propertyFee);
+    if (!Number.isFinite(propertyFee) || propertyFee <= 0) errors.propertyFee = "物业费必须是大于 0 的数字。";
+  }
+  if (form.recentDealPrice.trim()) {
+    const recentDealPrice = Number(form.recentDealPrice);
+    if (!Number.isFinite(recentDealPrice) || recentDealPrice <= 0) errors.recentDealPrice = "成交价格线索必须是大于 0 的数字。";
   }
   if (form.deliveryYear.trim()) {
     const deliveryYear = Number(form.deliveryYear);
@@ -237,7 +274,15 @@ export function PropertyForm() {
       totalFloors: property.totalFloors === null || property.totalFloors === undefined ? "" : String(property.totalFloors),
       metroDistance: property.metroDistance === null ? "" : String(property.metroDistance),
       schoolInformation: property.schoolInformation,
-      propertyManagementInformation: property.propertyManagementInformation,
+      propertyManagementInformation: property.propertyCompany ?? property.propertyManagementInformation,
+      propertyFee: property.propertyFee === null || property.propertyFee === undefined ? "" : String(property.propertyFee),
+      propertyExperience: property.propertyExperience ?? "",
+      environment: property.environment ?? "",
+      noise: property.noise ?? "",
+      parking: property.parking ?? "",
+      publicArea: property.publicArea ?? "",
+      actualCommuteExperience: property.actualCommuteExperience ?? "",
+      recentDealPrice: property.recentDealPrice === null || property.recentDealPrice === undefined ? "" : String(property.recentDealPrice),
       listingPrice: property.listingPrice === null || property.listingPrice === undefined ? "" : String(property.listingPrice),
       deliveryYear: property.deliveryYear === null || property.deliveryYear === undefined ? "" : String(property.deliveryYear),
       orientation: property.orientation ?? "",
@@ -341,6 +386,15 @@ export function PropertyForm() {
       metroDistance: form.metroDistance.trim() ? Number(form.metroDistance) : null,
       schoolInformation: form.schoolInformation.trim(),
       propertyManagementInformation: form.propertyManagementInformation.trim(),
+      propertyCompany: form.propertyManagementInformation.trim() || null,
+      propertyFee: form.propertyFee.trim() ? Number(form.propertyFee) : null,
+      propertyExperience: form.propertyExperience.trim() || null,
+      environment: form.environment.trim() || null,
+      noise: form.noise.trim() || null,
+      parking: form.parking.trim() || null,
+      publicArea: form.publicArea.trim() || null,
+      actualCommuteExperience: form.actualCommuteExperience.trim() || null,
+      recentDealPrice: form.recentDealPrice.trim() ? Number(form.recentDealPrice) : null,
       listingPrice: form.listingPrice.trim() ? Number(form.listingPrice) : null,
       deliveryYear: form.deliveryYear.trim() ? Number(form.deliveryYear) : null,
       orientation: form.orientation ? form.orientation as Orientation : null,
@@ -399,10 +453,16 @@ export function PropertyForm() {
         </CardHeader>
         <CardContent className="grid gap-6 px-6 py-7 sm:grid-cols-2 sm:px-8">
           <div>
+            <Label htmlFor="listingPrice">挂牌价（万元，选填）</Label>
+            <Input id="listingPrice" className="mt-2" type="number" min="0" step="0.01" inputMode="decimal" value={form.listingPrice} onChange={(event) => updateField("listingPrice", event.target.value)} placeholder="例如：228" {...inputErrorProps("listingPrice")} />
+            <FieldError id="listingPrice-error" message={errors.listingPrice} />
+            <p className="mt-2 text-xs leading-5 text-[#777a74]">当前业主/平台挂牌价格，可选。</p>
+          </div>
+          <div>
             <Label htmlFor="totalPrice">预期成交总价（万元）*</Label>
             <Input id="totalPrice" className="mt-2" type="number" min="0" step="0.01" inputMode="decimal" value={form.totalPrice} onChange={(e) => updateField("totalPrice", e.target.value)} placeholder="例如：220" aria-describedby={errors.totalPrice ? "totalPrice-error totalPrice-help" : "totalPrice-help"} aria-invalid={Boolean(errors.totalPrice)} />
             <FieldError id="totalPrice-error" message={errors.totalPrice} />
-            <p id="totalPrice-help" className="mt-2 text-xs leading-5 text-[#777a74]">可根据与业主/中介沟通后的价格填写；若尚未谈价，可结合近期成交估算。</p>
+            <p id="totalPrice-help" className="mt-2 text-xs leading-5 text-[#777a74]">根据当前谈价预期填写；若尚未谈价，可结合挂牌价和近期成交参考估算。</p>
           </div>
           <div>
             <Label htmlFor="area">建筑面积（㎡）*</Label>
@@ -445,37 +505,27 @@ export function PropertyForm() {
           <CardDescription>可暂时留空。信息缺失只会降低未来分析可信度，不代表房源较差。</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-6 px-6 py-7 sm:px-8 lg:grid-cols-2">
-          <div className="lg:col-span-2">
-            <Label htmlFor="metroDistance">距离最近地铁站（米）</Label>
-            <div className="relative mt-2">
-              <TrainFront size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#8a8d87]" />
-              <Input id="metroDistance" className="pl-11" type="number" min="0" step="1" inputMode="numeric" value={form.metroDistance} onChange={(e) => updateField("metroDistance", e.target.value)} placeholder="例如：650" {...inputErrorProps("metroDistance")} />
-            </div>
-            <FieldError id="metroDistance-error" message={errors.metroDistance} />
-          </div>
-          <div>
+          <p className="rounded-xl bg-[#f4f5f1] px-4 py-3 text-xs leading-5 text-[#686d65] lg:col-span-2">{confirmedLocation ? "公共交通信息将在分析时根据已确认位置自动获取。" : "确认房源位置后，系统将自动获取地铁和公交信息。"}</p>
+          <div id="school-information" className="scroll-mt-24 rounded-lg target:ring-2 target:ring-[#aebda8] target:ring-offset-4">
             <Label htmlFor="schoolInformation" className="flex items-center gap-2"><School size={16} /> 学校信息</Label>
             <Textarea id="schoolInformation" className="mt-2" value={form.schoolInformation} onChange={(e) => updateField("schoolInformation", e.target.value)} placeholder="例如：实验小学，入学资格待确认" />
           </div>
           <div>
-            <Label htmlFor="propertyManagementInformation">物业管理信息</Label>
-            <Textarea id="propertyManagementInformation" className="mt-2" value={form.propertyManagementInformation} onChange={(e) => updateField("propertyManagementInformation", e.target.value)} placeholder="例如：保利物业，公区维护良好，物业费 4.8 元/㎡/月" />
+            <Label htmlFor="propertyManagementInformation">物业公司 / 管理主体</Label>
+            <Input id="propertyManagementInformation" list="property-management-options" className="mt-2" value={form.propertyManagementInformation} onChange={(e) => updateField("propertyManagementInformation", e.target.value)} placeholder="搜索或手动输入物业公司" />
+            <datalist id="property-management-options">{PROPERTY_MANAGEMENT_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist>
+            <p className="mt-2 text-xs leading-5 text-[#777a74]">列表不完整；其他物业可直接手动输入。记录公司名称仅表示管理主体已知，不代表服务质量评分。</p>
           </div>
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="supplemental-information">
         <CardHeader className="border-b border-[#eceae5] px-6 py-5 sm:px-8">
           <CardTitle>补充分析信息</CardTitle>
           <CardDescription>全部选填。仅记录客观事实；信息不足会降低覆盖率，不会被自动记为低分。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-7 px-6 py-7 sm:px-8">
-          <div className="grid gap-6 sm:grid-cols-3">
-            <div>
-              <Label htmlFor="listingPrice">挂牌价（万元）</Label>
-              <Input id="listingPrice" className="mt-2" type="number" min="0" step="0.01" inputMode="decimal" value={form.listingPrice} onChange={(event) => updateField("listingPrice", event.target.value)} placeholder="例如：228" {...inputErrorProps("listingPrice")} />
-              <FieldError id="listingPrice-error" message={errors.listingPrice} />
-            </div>
+          <div className="grid gap-6 sm:grid-cols-2">
             <div>
               <Label htmlFor="deliveryYear">交付年份</Label>
               <Input id="deliveryYear" className="mt-2" type="number" min="1900" max="2100" step="1" inputMode="numeric" value={form.deliveryYear} onChange={(event) => updateField("deliveryYear", event.target.value)} placeholder="例如：2018" {...inputErrorProps("deliveryYear")} />
@@ -491,11 +541,36 @@ export function PropertyForm() {
             </div>
           </div>
 
-          <div className="border-t border-[#eceae5] pt-6">
+          <div className="scroll-mt-24 rounded-xl border-t border-[#eceae5] pt-6 target:ring-2 target:ring-[#aebda8] target:ring-offset-4" id="property-service">
+            <div>
+              <Label>物业与小区现场信息</Label>
+              <p className="mt-1 text-xs leading-5 text-[#777a74]">记录你实地看房或可靠渠道获得的信息。系统会将其作为补充证据，并结合公开信息重新评估可信度；不会仅凭单条主观描述直接生成高分。</p>
+            </div>
+            <div className="mt-4 grid gap-5 sm:grid-cols-2">
+              <div>
+                <Label htmlFor="propertyFee">物业费（元/㎡/月）</Label>
+                <Input id="propertyFee" className="mt-2" type="number" min="0" step="0.01" inputMode="decimal" value={form.propertyFee} onChange={(event) => updateField("propertyFee", event.target.value)} placeholder="例如：3.8" {...inputErrorProps("propertyFee")} />
+                <FieldError id="propertyFee-error" message={errors.propertyFee} />
+              </div>
+              <div className="sm:col-span-2"><Label htmlFor="propertyExperience">物业服务体验</Label><Textarea id="propertyExperience" className="mt-2" value={form.propertyExperience} onChange={(event) => updateField("propertyExperience", event.target.value)} placeholder="例如：门岗响应及时，报修效率仍需继续观察" /></div>
+              <div id="community-quality" className="scroll-mt-24 rounded-lg target:ring-2 target:ring-[#aebda8] target:ring-offset-4"><Label htmlFor="environment">小区环境</Label><Textarea id="environment" className="mt-2" value={form.environment} onChange={(event) => updateField("environment", event.target.value)} placeholder="记录绿化、采光、卫生等现场观察" /></div>
+              <div><Label htmlFor="noise">噪音情况</Label><Textarea id="noise" className="mt-2" value={form.noise} onChange={(event) => updateField("noise", event.target.value)} placeholder="记录道路、商业或邻里噪音" /></div>
+              <div><Label htmlFor="parking">停车情况</Label><Textarea id="parking" className="mt-2" value={form.parking} onChange={(event) => updateField("parking", event.target.value)} placeholder="记录车位、停车费或出入体验" /></div>
+              <div><Label htmlFor="publicArea">公共区域</Label><Textarea id="publicArea" className="mt-2" value={form.publicArea} onChange={(event) => updateField("publicArea", event.target.value)} placeholder="记录大堂、电梯、走廊和设施维护" /></div>
+            </div>
+          </div>
+
+          <div id="actual-commute-experience" className="scroll-mt-24 rounded-xl border-t border-[#eceae5] pt-6 target:ring-2 target:ring-[#aebda8] target:ring-offset-4">
+            <Label htmlFor="actualCommuteExperience">实际通勤体验</Label>
+            <Textarea id="actualCommuteExperience" className="mt-2" value={form.actualCommuteExperience} onChange={(event) => updateField("actualCommuteExperience", event.target.value)} placeholder="例如：工作日早高峰实测约45分钟，晚高峰约50分钟" />
+            <p className="mt-2 text-xs leading-5 text-[#777a74]">仅作为你的实测记录和后续解读依据，不会覆盖高德路线或自动改变通勤评分。</p>
+          </div>
+
+          <div id="transaction-references" className="scroll-mt-24 rounded-xl border-t border-[#eceae5] pt-6 target:ring-2 target:ring-[#aebda8] target:ring-offset-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <Label>近期成交参考</Label>
-                <p className="mt-1 text-xs leading-5 text-[#777a74]">至少 3 条近 24 个月且已确认的记录，才能计算成交价合理性。</p>
+                <p className="mt-1 text-xs leading-5 text-[#777a74]">未确认记录只作为待核验线索；至少 3 条近 24 个月、信息完整且已确认的记录，才可能计算成交价合理性。</p>
               </div>
               <Button type="button" className="bg-white text-[#4f5f49] ring-1 ring-[#dcdad4] hover:bg-[#f3f4ef]" onClick={() => setForm((current) => ({ ...current, comparableTransactions: [...current.comparableTransactions, createComparableRow()] }))}>
                 <Plus size={16} /> 添加成交参考

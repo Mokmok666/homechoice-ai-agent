@@ -5,13 +5,8 @@ import { useEffect, useState } from "react";
 import { ArrowRight, CalendarDays, Clock3, Home, Star, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { deleteDecisionHistory, getDecisionHistory } from "@/lib/decision-history-storage";
+import { RECOMMENDATION_BADGE_STYLES, RECOMMENDATION_LABELS } from "@/lib/recommendation-presentation";
 import type { DecisionHistoryRecord } from "@/types/decision-history";
-
-const RECOMMENDATION_LABELS = {
-  CONSIDER: "优先考虑",
-  WAIT: "谨慎考虑",
-  PASS: "暂不推荐",
-} as const;
 
 function formatSavedAt(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -64,7 +59,7 @@ export function DecisionHistoryList() {
               <div className="rounded-xl bg-[#f5f5f1] p-3 text-sm">
                 <span className="flex items-center gap-2 text-xs text-[#687a61]"><Star size={14} />当时首选</span>
                 <b className="mt-1 block truncate">{topProperty?.name ?? "暂无明确首选"}</b>
-                {topResult && <p className="mt-1 text-xs text-[#858781]">{RECOMMENDATION_LABELS[topResult.recommendation]} · 匹配度 {topResult.overallScore ?? "—"}</p>}
+                {topResult && <p className={`mt-2 w-fit rounded-full px-2.5 py-1 text-xs font-medium ${RECOMMENDATION_BADGE_STYLES[topResult.recommendation]}`}>{RECOMMENDATION_LABELS[topResult.recommendation]} · 匹配度 {topResult.overallScore ?? "—"}</p>}
               </div>
               <div className="mt-3 flex items-center justify-end gap-3">
                 <button type="button" onClick={() => setPendingDelete(record)} className="inline-flex items-center gap-1.5 text-xs text-[#9b5a50] transition hover:text-[#7f4038]" aria-label={`删除 ${record.title}`}><Trash2 size={14} />删除</button>

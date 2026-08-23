@@ -76,6 +76,15 @@ export interface Property {
   metroDistance: number | null;
   schoolInformation: string;
   propertyManagementInformation: string;
+  propertyCompany?: string | null;
+  propertyFee?: number | null;
+  propertyExperience?: string | null;
+  environment?: string | null;
+  noise?: string | null;
+  parking?: string | null;
+  publicArea?: string | null;
+  actualCommuteExperience?: string | null;
+  recentDealPrice?: number | null;
   listingPrice?: number | null;
   comparableTransactions?: ComparableTransaction[];
   deliveryYear?: number | null;
@@ -109,6 +118,15 @@ export type PropertyInput = Pick<
   | "metroDistance"
   | "schoolInformation"
   | "propertyManagementInformation"
+  | "propertyCompany"
+  | "propertyFee"
+  | "propertyExperience"
+  | "environment"
+  | "noise"
+  | "parking"
+  | "publicArea"
+  | "actualCommuteExperience"
+  | "recentDealPrice"
   | "listingPrice"
   | "comparableTransactions"
   | "deliveryYear"
