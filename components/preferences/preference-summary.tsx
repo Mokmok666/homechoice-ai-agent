@@ -44,7 +44,8 @@ export const PRIORITY_LABELS: Record<DecisionPriority, string> = {
   community_quality: "小区品质",
   property_management: "物业服务",
   education: "教育",
-  commercial_amenities: "商业生活配套",
+  commercial_amenities: "商业配套",
+  medical_amenities: "医疗配套",
   public_transport: "公共交通便利度",
   liquidity: "流动性",
   value_preservation: "长期保值",
@@ -71,8 +72,8 @@ function SummaryItem({ icon, label, children }: { icon: React.ReactNode; label: 
     <div className="flex gap-4 border-b border-white/15 py-5 last:border-0">
       <span className="grid size-10 shrink-0 place-items-center rounded-full border border-white/25 text-[#e5dfca]">{icon}</span>
       <div>
-        <p className="text-xs tracking-[0.16em] text-white/50">{label}</p>
-        <div className="mt-1 text-sm leading-6 text-white/85">{children}</div>
+        <p className="text-[13px] tracking-[0.16em] text-white/55">{label}</p>
+        <div className="mt-1 text-[15px] leading-6 text-white/85">{children}</div>
       </div>
     </div>
   );
@@ -90,10 +91,10 @@ export function PreferenceSummary(props: PreferenceSummaryProps) {
     : "待选择教育需求";
 
   return (
-    <aside className="rounded-[24px] bg-[#585851] p-6 text-[#f7f3e8] shadow-[0_20px_60px_rgba(44,43,38,0.12)] sm:p-8 lg:sticky lg:top-28">
+    <aside className="rounded-[24px] bg-[#585851] p-6 text-[#f7f3e8] shadow-[0_20px_60px_rgba(44,43,38,0.12)] sm:p-7 lg:sticky lg:top-28">
       <p className="text-xs tracking-[0.18em] text-[#d9d1b9]">实时更新</p>
       <h2 className="mt-2 font-serif text-3xl">购房偏好摘要</h2>
-      <p className="mt-3 text-sm leading-6 text-white/60">这里只归纳你当前填写的结构化偏好，不包含 AI 分析或房源评分。</p>
+      <p className="mt-3 text-[15px] leading-6 text-white/65">这里只归纳你当前填写的结构化偏好，不包含 AI 分析或房源评分。</p>
       <div className="mt-5">
         <SummaryItem icon={<BriefcaseBusiness size={18} />} label="购房目标">
           {props.purchasePurpose ? PURCHASE_PURPOSE_LABELS[props.purchasePurpose] : "待选择"}

@@ -1,15 +1,17 @@
 const AMAP_NEARBY_ENDPOINT = "https://restapi.amap.com/v5/place/around";
 const AMAP_NEARBY_RADIUS_METERS = 1_000;
 const AMAP_METRO_SEARCH_RADIUS_METERS = 5_000;
+const AMAP_COMMERCIAL_RADIUS_METERS = 2_000;
+const AMAP_MEDICAL_RADIUS_METERS = 3_000;
 const AMAP_REQUEST_TIMEOUT_MS = 10_000;
 const MAX_EXAMPLES = 5;
 
 const POI_TYPES = {
   metro: "150500",
   bus: "150700",
-  commercial: "060100|060400",
+  commercial: "060100",
   supermarket: "060400",
-  medical: "090100|090200|090300|090400|090500",
+  medical: "090100|090203|090204|090205|090206|090207|090208|090209|090210|090211",
   park: "110101",
 } as const;
 
@@ -45,13 +47,17 @@ export interface NearbyPoiResult {
     countWithin800m: number;
   };
   commercial: {
-    countWithin1000m: number;
-    hasMajorDestination: boolean;
+    countWithin2000m: number;
+    nearest?: { name: string; distanceMeters: number; location: NearbyCoordinates };
     examples: string[];
   };
-  dailyLife: {
+  medical: {
+    hospitalCountWithin3000m: number;
+    nearest?: { name: string; distanceMeters: number; location: NearbyCoordinates };
+    examples: string[];
+  };
+  nearbyFacilities: {
     supermarketCount: number;
-    medicalCount: number;
     parkCount: number;
     examples: string[];
   };
@@ -78,6 +84,7 @@ interface NormalizedPoi {
   id: string;
   name: string;
   typecode?: string;
+  type?: string;
   location: NearbyCoordinates;
 }
 
@@ -126,11 +133,34 @@ function normalizePois(value: unknown): NormalizedPoi[] {
       id: providerId || dedupeKey,
       name,
       typecode: typeof candidate.typecode === "string" ? candidate.typecode.trim() : undefined,
+      type: typeof candidate.type === "string" ? candidate.type.trim() : undefined,
       location,
     });
   });
 
   return normalized;
+}
+
+const COMMERCIAL_EXCLUSION = /便利店|超市|市场|菜市场|餐厅|饭店|咖啡|小吃|药店|药房|酒店|宾馆|KTV|影院|网吧|会所|足浴|按摩|生活服务|专卖店|便利超市|建设中|在建|停车场|出入口|入口|[东南西北]门|\d+号楼|\d+座/;
+const COMMERCIAL_NAME_SIGNAL = /商场|购物中心|商业中心|商业综合体|购物广场|商业广场|百货/;
+const MEDICAL_NAME_EXCLUSION = /药店|药房|诊所|门诊部|口腔|牙科|医美|美容|体检|保健|按摩|养老|护理院|卫生站|卫生室/;
+const MEDICAL_TYPE_EXCLUSION = /口腔医院|整形美容|诊所|卫生所|卫生站/;
+const MEDICAL_NAME_SIGNAL = /医院|医疗中心/;
+
+function isLargeCommercialPoi(poi: NormalizedPoi): boolean {
+  if (COMMERCIAL_EXCLUSION.test(`${poi.name} ${poi.type ?? ""}`)) return false;
+  const structuredMall = poi.typecode?.startsWith("0601") === true && /商场|购物中心|百货|商业综合体/.test(poi.type ?? "");
+  return structuredMall || (!poi.typecode && COMMERCIAL_NAME_SIGNAL.test(poi.name));
+}
+
+function isFormalHospitalPoi(poi: NormalizedPoi): boolean {
+  if (MEDICAL_NAME_EXCLUSION.test(poi.name) || MEDICAL_TYPE_EXCLUSION.test(poi.type ?? "")) return false;
+  const structuredHospital = poi.typecode?.startsWith("0901") === true || poi.typecode?.startsWith("0902") === true;
+  return structuredHospital && MEDICAL_NAME_SIGNAL.test(`${poi.name} ${poi.type ?? ""}`);
+}
+
+function canonicalHospitalName(name: string): string {
+  return name.match(/^(.{2,}?医院)/)?.[1] ?? name;
 }
 
 function distanceInMeters(origin: NearbyCoordinates, target: NearbyCoordinates): number {
@@ -224,9 +254,9 @@ export async function getNearbyPoiEvidence(
   const settled = await Promise.allSettled([
     searchNearbyByTypes(coordinates, POI_TYPES.metro, apiKey, AMAP_METRO_SEARCH_RADIUS_METERS),
     searchNearbyByTypes(coordinates, POI_TYPES.bus, apiKey),
-    searchNearbyByTypes(coordinates, POI_TYPES.commercial, apiKey),
+    searchNearbyByTypes(coordinates, POI_TYPES.commercial, apiKey, AMAP_COMMERCIAL_RADIUS_METERS),
     searchNearbyByTypes(coordinates, POI_TYPES.supermarket, apiKey),
-    searchNearbyByTypes(coordinates, POI_TYPES.medical, apiKey),
+    searchNearbyByTypes(coordinates, POI_TYPES.medical, apiKey, AMAP_MEDICAL_RADIUS_METERS),
     searchNearbyByTypes(coordinates, POI_TYPES.park, apiKey),
   ]);
   if (settled.every((result) => result.status === "rejected")) {
@@ -260,6 +290,25 @@ export async function getNearbyPoiEvidence(
     .map((poi) => ({ poi, distanceMeters: Math.round(distanceInMeters(coordinates, poi.location)) }))
     .sort((left, right) => left.distanceMeters - right.distanceMeters);
   const nearestBus = busWithDistance[0];
+  const commercialWithDistance = commercial.pois
+    .filter(isLargeCommercialPoi)
+    .map((poi) => ({ poi, distanceMeters: Math.round(distanceInMeters(coordinates, poi.location)) }))
+    .filter((item) => item.distanceMeters <= AMAP_COMMERCIAL_RADIUS_METERS)
+    .sort((left, right) => left.distanceMeters - right.distanceMeters);
+  const medicalCandidates = medical.pois
+    .filter(isFormalHospitalPoi)
+    .map((poi) => ({ poi: { ...poi, name: canonicalHospitalName(poi.name) }, distanceMeters: Math.round(distanceInMeters(coordinates, poi.location)) }))
+    .filter((item) => item.distanceMeters <= AMAP_MEDICAL_RADIUS_METERS)
+    .sort((left, right) => left.distanceMeters - right.distanceMeters);
+  const seenHospitals = new Set<string>();
+  const medicalWithDistance = medicalCandidates.filter((item) => {
+    const key = item.poi.name.normalize("NFKC").replace(/[\s·•・]/g, "");
+    if (seenHospitals.has(key)) return false;
+    seenHospitals.add(key);
+    return true;
+  });
+  const nearestCommercial = commercialWithDistance[0];
+  const nearestHospital = medicalWithDistance[0];
 
   return {
     availability: {
@@ -286,18 +335,19 @@ export async function getNearbyPoiEvidence(
       countWithin800m: busWithDistance.filter((item) => item.distanceMeters <= 800).length,
     },
     commercial: {
-      countWithin1000m: commercial.pois.length,
-      hasMajorDestination: commercial.pois.some((poi) =>
-        poi.typecode?.startsWith("0601") === true ||
-        /商场|购物中心|商业综合体|购物广场|商业广场/.test(poi.name)
-      ),
-      examples: uniqueExamples([commercial.pois]),
+      countWithin2000m: commercialWithDistance.length,
+      ...(nearestCommercial ? { nearest: { name: nearestCommercial.poi.name, distanceMeters: nearestCommercial.distanceMeters, location: nearestCommercial.poi.location } } : {}),
+      examples: uniqueExamples([commercialWithDistance.map((item) => item.poi)]),
     },
-    dailyLife: {
+    medical: {
+      hospitalCountWithin3000m: medicalWithDistance.length,
+      ...(nearestHospital ? { nearest: { name: nearestHospital.poi.name, distanceMeters: nearestHospital.distanceMeters, location: nearestHospital.poi.location } } : {}),
+      examples: uniqueExamples([medicalWithDistance.map((item) => item.poi)]),
+    },
+    nearbyFacilities: {
       supermarketCount: supermarket.pois.length,
-      medicalCount: medical.pois.length,
       parkCount: park.pois.length,
-      examples: uniqueExamples([supermarket.pois, medical.pois, park.pois]),
+      examples: uniqueExamples([supermarket.pois, park.pois]),
     },
     fetchedAt: new Date().toISOString(),
   };

@@ -109,14 +109,14 @@ export function WorkLocationConfirmation({
 
       {confirmedLocation && <div className="mt-3 rounded-xl border border-[#aebaa8] bg-[#f4f7f2] p-4">
         <div className="flex items-start justify-between gap-4">
-          <div><p className="flex items-center gap-2 text-sm font-semibold text-[#53664d]"><CheckCircle2 size={16} /> 已确认工作地点</p><p className="mt-2 font-medium">{confirmedLocation.name}</p><p className="mt-1 text-xs leading-5 text-[#72766f]">{confirmedLocation.formattedAddress}</p></div>
+          <div><p className="flex items-center gap-2 text-[15px] font-semibold text-[#53664d]"><CheckCircle2 size={16} /> 已确认工作地点</p><p className="mt-2 text-[15px] font-medium">{confirmedLocation.name}</p><p className="mt-1 text-sm leading-6 text-[#72766f]">{confirmedLocation.formattedAddress}</p></div>
           <Button type="button" className="h-9 bg-transparent px-3 text-[#65775e] hover:bg-white" onClick={() => reset()}><X size={15} /> 重新选择</Button>
         </div>
       </div>}
 
       {candidates.length > 0 && <div className="mt-3 space-y-2">
         {candidates.map((candidate) => <div key={candidate.poiId ?? `${candidate.name}-${candidate.lng}-${candidate.lat}`} className="flex flex-col gap-3 rounded-xl border border-[#e4e2dc] bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div><p className="font-medium">{candidate.name}</p><p className="mt-1 text-xs leading-5 text-[#747871]">{candidate.formattedAddress}</p><p className="mt-1 text-[11px] text-[#92948f]">{[candidate.city, candidate.district].filter(Boolean).join(" · ")}</p></div>
+          <div><p className="text-[15px] font-medium">{candidate.name}</p><p className="mt-1 text-sm leading-6 text-[#747871]">{candidate.formattedAddress}</p><p className="mt-1 text-[13px] text-[#92948f]">{[candidate.city, candidate.district].filter(Boolean).join(" · ")}</p></div>
           <Button type="button" className="h-9 border border-[#9cac94] bg-white px-4 text-[#5f7357] hover:bg-[#f2f5f0]" onClick={() => confirm(candidate)}>选择此位置</Button>
         </div>)}
       </div>}

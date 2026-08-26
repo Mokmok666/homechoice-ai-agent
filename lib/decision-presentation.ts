@@ -24,7 +24,8 @@ const PRIORITY_DIMENSIONS: Record<DecisionPriority, DimensionKey[]> = {
   community_quality: ["community_quality"],
   property_management: ["property_management"],
   education: ["education"],
-  commercial_amenities: ["commercial_amenities", "daily_life_amenities"],
+  commercial_amenities: ["commercial_amenities"],
+  medical_amenities: ["medical_amenities"],
   public_transport: ["public_transport"],
   liquidity: ["liquidity"],
   value_preservation: ["value_preservation"],
@@ -68,6 +69,8 @@ export function buildDecisionRisks(input: {
   const community = dimension(input.result, "community_quality");
   const commute = input.geoEvidenceByProperty[input.property.id]?.commute;
   const education = dimension(input.result, "education");
+  const commercial = dimension(input.result, "commercial_amenities");
+  const medical = dimension(input.result, "medical_amenities");
   const hasPropertyExperience = validateTextField(input.property.propertyExperience).status === "valid";
   const hasActualCommuteExperience = validateTextField(input.property.actualCommuteExperience).status === "valid";
   const communityChecks = [
@@ -84,6 +87,8 @@ export function buildDecisionRisks(input: {
     if (priority === "community_quality" && community?.status !== "known" && missingCommunityChecks.length > 0) add("小区实际品质", webConclusion(input.webEvidenceByProperty, input.property.id, "community_quality") ?? "公开资料尚不足以替代现场看房和长期住户体验。", missingCommunityChecks.slice(0, 3), "community-quality");
     if (priority === "commute" && (!commute?.primary || commute.primary.status === "unavailable") && !hasActualCommuteExperience) add("实际通勤体验", "当前缺少稳定路线证据，建议在常用时段实地确认门到门通勤体验。", ["在工作日常用时段实测路线", "记录门到门耗时和换乘等待"], "actual-commute-experience");
     if (priority === "education" && input.preferences.educationNeed !== "none" && education?.status !== "known") add("教育资格", "当前信息不能证明具体入学资格，仍需以最新官方政策和实际资格核验为准。", ["核对当年招生范围", "向主管部门确认家庭资格条件"], "school-information");
+    if (priority === "commercial_amenities" && (!commercial || commercial.status === "unknown")) add("大型商业可达性", "当前缺少可用的大型商场、购物中心或商业综合体证据，尚无法判断集中商业是否便利。", ["实地确认常用大型商业体", "核对商业体当前运营状态"]);
+    if (priority === "medical_amenities" && (!medical || medical.status === "unknown")) add("正规医疗可达性", "当前缺少可用的正规医院证据，尚无法判断医院可达性。", ["核实附近正规医院位置", "确认常用就医路线"]);
   }
   for (const mismatch of input.result.hardMismatches) add(DIMENSION_LABELS[mismatch.dimension], mismatch.reason, ["核实当前输入与购买边界"]);
   for (const item of input.result.confidence.evidenceItems.filter((evidence) => evidence.category === "optional_confirmation")) add(item.title, item.description, [item.description]);

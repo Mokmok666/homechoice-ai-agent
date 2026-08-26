@@ -44,7 +44,8 @@ function isValidHistoryRecord(value: unknown): value is DecisionHistoryRecord {
       typeof reason.description !== "string" ||
       typeof reason.dimension !== "string" ||
       !["high", "medium", "low"].includes(String(reason.confidence)) ||
-      (reason.label !== undefined && !["您的重点偏好", "关键差异", "强证据支持"].includes(String(reason.label)))
+      (reason.type !== undefined && !["DIFFERENTIATOR", "PREFERENCE_MATCH", "SUPPORTING_FACTOR"].includes(String(reason.type))) ||
+      (reason.label !== undefined && !["关键优势", "您的重点偏好", "综合支撑", "关键差异", "强证据支持"].includes(String(reason.label)))
     ))
   ) {
     return false;

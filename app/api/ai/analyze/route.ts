@@ -57,6 +57,9 @@ export async function POST(request: Request): Promise<NextResponse<AIAnalysisRes
     try {
       analysis = JSON.parse(rawOutput) as unknown;
     } catch {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("[AI validation]", ["analysis output is not valid JSON"]);
+      }
       return errorResponse("INVALID_AI_OUTPUT", "AI 返回内容无法安全解析。", false);
     }
 
@@ -74,10 +77,24 @@ export async function POST(request: Request): Promise<NextResponse<AIAnalysisRes
       candidate,
       requestValidation.data.context.authoritativeTopPropertyId,
       requestValidation.data.context.candidates[0]?.property.name ?? undefined,
-      requestValidation.data.context.candidates.slice(1).flatMap((candidate) => candidate.property.name ? [candidate.property.name] : []),
+      requestValidation.data.context.candidates.slice(1, 2).flatMap((candidate) => candidate.property.name ? [candidate.property.name] : []),
       requiresCommuteBoundaryNuance(requestValidation.data),
+      {
+        educationNeed: requestValidation.data.context.preferences.educationNeed,
+        dimensions: requestValidation.data.context.candidates[0]?.decision.dimensions.map((dimension) => ({
+          label: dimension.label,
+          score: dimension.score,
+          status: dimension.status,
+        })) ?? [],
+      },
     );
     if (!responseValidation.success || !responseValidation.data.ok) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn(
+          "[AI validation]",
+          responseValidation.success ? ["analysis returned an error response"] : responseValidation.errors,
+        );
+      }
       return errorResponse("INVALID_AI_OUTPUT", "AI 返回内容未通过安全校验。", false);
     }
 

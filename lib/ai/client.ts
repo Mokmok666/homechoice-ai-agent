@@ -24,7 +24,7 @@ async function performAIAnalysisRequest(
       payload,
       request.context.authoritativeTopPropertyId,
       request.context.candidates[0]?.property.name ?? undefined,
-      request.context.candidates.slice(1).flatMap((candidate) => candidate.property.name ? [candidate.property.name] : []),
+      request.context.candidates.slice(1, 2).flatMap((candidate) => candidate.property.name ? [candidate.property.name] : []),
       requiresCommuteBoundaryNuance(request),
     );
     if (!validation.success) {

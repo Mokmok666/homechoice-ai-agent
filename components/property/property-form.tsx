@@ -68,7 +68,7 @@ const PROPERTY_MANAGEMENT_OPTIONS = [
   "雅生活",
 ] as const;
 
-const SELECT_CLASS = "mt-2 h-12 w-full rounded-lg border border-[#deddd8] bg-white px-4 text-sm outline-none focus:border-[#7d8f75] focus:ring-2 focus:ring-[#7d8f75]/10";
+const SELECT_CLASS = "mt-2 h-12 w-full rounded-lg border border-[#deddd8] bg-white px-4 text-[15px] outline-none focus:border-[#7d8f75] focus:ring-2 focus:ring-[#7d8f75]/10";
 
 interface ComparableFormRow {
   id: string;
@@ -432,7 +432,7 @@ export function PropertyForm() {
             <div><CardTitle>基本房源信息</CardTitle><CardDescription>用于识别房源并建立统一比较结构。</CardDescription></div>
           </div>
         </CardHeader>
-        <CardContent className="grid gap-6 px-6 py-7 sm:px-8 lg:grid-cols-2">
+        <CardContent className="grid gap-5 px-6 py-6 sm:px-8 lg:grid-cols-2">
           <LocationConfirmation
             city={form.city}
             district={form.district}
@@ -451,18 +451,18 @@ export function PropertyForm() {
         <CardHeader className="border-b border-[#eceae5] px-6 py-5 sm:px-8">
           <CardTitle>价格与户型</CardTitle><CardDescription>预期成交价单位为万元，面积单位为平方米。</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-6 px-6 py-7 sm:grid-cols-2 sm:px-8">
+        <CardContent className="grid gap-5 px-6 py-6 sm:grid-cols-2 sm:px-8">
           <div>
             <Label htmlFor="listingPrice">挂牌价（万元，选填）</Label>
             <Input id="listingPrice" className="mt-2" type="number" min="0" step="0.01" inputMode="decimal" value={form.listingPrice} onChange={(event) => updateField("listingPrice", event.target.value)} placeholder="例如：228" {...inputErrorProps("listingPrice")} />
             <FieldError id="listingPrice-error" message={errors.listingPrice} />
-            <p className="mt-2 text-xs leading-5 text-[#777a74]">当前业主/平台挂牌价格，可选。</p>
+            <p className="mt-2 text-sm leading-6 text-[#777a74]">当前业主/平台挂牌价格，可选。</p>
           </div>
           <div>
             <Label htmlFor="totalPrice">预期成交总价（万元）*</Label>
             <Input id="totalPrice" className="mt-2" type="number" min="0" step="0.01" inputMode="decimal" value={form.totalPrice} onChange={(e) => updateField("totalPrice", e.target.value)} placeholder="例如：220" aria-describedby={errors.totalPrice ? "totalPrice-error totalPrice-help" : "totalPrice-help"} aria-invalid={Boolean(errors.totalPrice)} />
             <FieldError id="totalPrice-error" message={errors.totalPrice} />
-            <p id="totalPrice-help" className="mt-2 text-xs leading-5 text-[#777a74]">根据当前谈价预期填写；若尚未谈价，可结合挂牌价和近期成交参考估算。</p>
+            <p id="totalPrice-help" className="mt-2 text-sm leading-6 text-[#777a74]">根据当前谈价预期填写；若尚未谈价，可结合挂牌价和近期成交参考估算。</p>
           </div>
           <div>
             <Label htmlFor="area">建筑面积（㎡）*</Label>
@@ -504,8 +504,8 @@ export function PropertyForm() {
           <CardTitle>生活与服务信息</CardTitle>
           <CardDescription>可暂时留空。信息缺失只会降低未来分析可信度，不代表房源较差。</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-6 px-6 py-7 sm:px-8 lg:grid-cols-2">
-          <p className="rounded-xl bg-[#f4f5f1] px-4 py-3 text-xs leading-5 text-[#686d65] lg:col-span-2">{confirmedLocation ? "公共交通信息将在分析时根据已确认位置自动获取。" : "确认房源位置后，系统将自动获取地铁和公交信息。"}</p>
+        <CardContent className="grid gap-5 px-6 py-6 sm:px-8 lg:grid-cols-2">
+          <p className="rounded-xl bg-[#f4f5f1] px-4 py-3 text-sm leading-6 text-[#686d65] lg:col-span-2">{confirmedLocation ? "公共交通信息将在分析时根据已确认位置自动获取。" : "确认房源位置后，系统将自动获取地铁和公交信息。"}</p>
           <div id="school-information" className="scroll-mt-24 rounded-lg target:ring-2 target:ring-[#aebda8] target:ring-offset-4">
             <Label htmlFor="schoolInformation" className="flex items-center gap-2"><School size={16} /> 学校信息</Label>
             <Textarea id="schoolInformation" className="mt-2" value={form.schoolInformation} onChange={(e) => updateField("schoolInformation", e.target.value)} placeholder="例如：实验小学，入学资格待确认" />
@@ -514,7 +514,7 @@ export function PropertyForm() {
             <Label htmlFor="propertyManagementInformation">物业公司 / 管理主体</Label>
             <Input id="propertyManagementInformation" list="property-management-options" className="mt-2" value={form.propertyManagementInformation} onChange={(e) => updateField("propertyManagementInformation", e.target.value)} placeholder="搜索或手动输入物业公司" />
             <datalist id="property-management-options">{PROPERTY_MANAGEMENT_OPTIONS.map((option) => <option key={option} value={option} />)}</datalist>
-            <p className="mt-2 text-xs leading-5 text-[#777a74]">列表不完整；其他物业可直接手动输入。记录公司名称仅表示管理主体已知，不代表服务质量评分。</p>
+            <p className="mt-2 text-sm leading-6 text-[#777a74]">列表不完整；其他物业可直接手动输入。记录公司名称仅表示管理主体已知，不代表服务质量评分。</p>
           </div>
         </CardContent>
       </Card>
@@ -524,7 +524,7 @@ export function PropertyForm() {
           <CardTitle>补充分析信息</CardTitle>
           <CardDescription>全部选填。仅记录客观事实；信息不足会降低覆盖率，不会被自动记为低分。</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-7 px-6 py-7 sm:px-8">
+        <CardContent className="space-y-6 px-6 py-6 sm:px-8">
           <div className="grid gap-6 sm:grid-cols-2">
             <div>
               <Label htmlFor="deliveryYear">交付年份</Label>
@@ -544,7 +544,7 @@ export function PropertyForm() {
           <div className="scroll-mt-24 rounded-xl border-t border-[#eceae5] pt-6 target:ring-2 target:ring-[#aebda8] target:ring-offset-4" id="property-service">
             <div>
               <Label>物业与小区现场信息</Label>
-              <p className="mt-1 text-xs leading-5 text-[#777a74]">记录你实地看房或可靠渠道获得的信息。系统会将其作为补充证据，并结合公开信息重新评估可信度；不会仅凭单条主观描述直接生成高分。</p>
+              <p className="mt-1 text-sm leading-6 text-[#777a74]">记录你实地看房或可靠渠道获得的信息。系统会将其作为补充证据，并结合公开信息重新评估可信度；不会仅凭单条主观描述直接生成高分。</p>
             </div>
             <div className="mt-4 grid gap-5 sm:grid-cols-2">
               <div>
@@ -563,14 +563,14 @@ export function PropertyForm() {
           <div id="actual-commute-experience" className="scroll-mt-24 rounded-xl border-t border-[#eceae5] pt-6 target:ring-2 target:ring-[#aebda8] target:ring-offset-4">
             <Label htmlFor="actualCommuteExperience">实际通勤体验</Label>
             <Textarea id="actualCommuteExperience" className="mt-2" value={form.actualCommuteExperience} onChange={(event) => updateField("actualCommuteExperience", event.target.value)} placeholder="例如：工作日早高峰实测约45分钟，晚高峰约50分钟" />
-            <p className="mt-2 text-xs leading-5 text-[#777a74]">仅作为你的实测记录和后续解读依据，不会覆盖高德路线或自动改变通勤评分。</p>
+            <p className="mt-2 text-sm leading-6 text-[#777a74]">仅作为你的实测记录和后续解读依据，不会覆盖高德路线或自动改变通勤评分。</p>
           </div>
 
           <div id="transaction-references" className="scroll-mt-24 rounded-xl border-t border-[#eceae5] pt-6 target:ring-2 target:ring-[#aebda8] target:ring-offset-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <Label>近期成交参考</Label>
-                <p className="mt-1 text-xs leading-5 text-[#777a74]">未确认记录只作为待核验线索；至少 3 条近 24 个月、信息完整且已确认的记录，才可能计算成交价合理性。</p>
+                <p className="mt-1 text-sm leading-6 text-[#777a74]">未确认记录只作为待核验线索；至少 3 条近 24 个月、信息完整且已确认的记录，才可能计算成交价合理性。</p>
               </div>
               <Button type="button" className="bg-white text-[#4f5f49] ring-1 ring-[#dcdad4] hover:bg-[#f3f4ef]" onClick={() => setForm((current) => ({ ...current, comparableTransactions: [...current.comparableTransactions, createComparableRow()] }))}>
                 <Plus size={16} /> 添加成交参考
@@ -585,11 +585,11 @@ export function PropertyForm() {
                   <div><Label htmlFor={`comparable-area-${item.id}`}>面积（㎡）</Label><Input id={`comparable-area-${item.id}`} className="mt-2" type="number" min="0" step="0.01" value={item.area} onChange={(event) => updateComparable(item.id, "area", event.target.value)} /></div>
                   <div><Label htmlFor={`comparable-date-${item.id}`}>成交日期</Label><Input id={`comparable-date-${item.id}`} className="mt-2" type="date" value={item.transactionDate} onChange={(event) => updateComparable(item.id, "transactionDate", event.target.value)} /></div>
                   <div><Label htmlFor={`comparable-source-${item.id}`}>来源</Label><Input id={`comparable-source-${item.id}`} className="mt-2" value={item.source} onChange={(event) => updateComparable(item.id, "source", event.target.value)} placeholder="例如：中介成交记录" /></div>
-                  <label className="flex h-11 items-center gap-2 whitespace-nowrap text-xs text-[#5f625d]"><input type="checkbox" checked={item.confirmed} onChange={(event) => updateComparable(item.id, "confirmed", event.target.checked)} /> 已确认</label>
+                  <label className="flex h-11 items-center gap-2 whitespace-nowrap text-[13px] text-[#5f625d]"><input type="checkbox" checked={item.confirmed} onChange={(event) => updateComparable(item.id, "confirmed", event.target.checked)} /> 已确认</label>
                   <button type="button" className="grid size-11 place-items-center rounded-lg border border-[#eadedb] text-[#9b5a50] hover:bg-[#fcf2f0]" onClick={() => setForm((current) => ({ ...current, comparableTransactions: current.comparableTransactions.filter((row) => row.id !== item.id) }))} aria-label={`删除第 ${index + 1} 条成交参考`}><Trash2 size={16} /></button>
                 </div>
               ))}
-              {form.comparableTransactions.length === 0 && <p className="rounded-xl border border-dashed border-[#dcd9d1] px-4 py-5 text-center text-xs text-[#8a8c87]">尚未添加成交参考，可稍后编辑房源补充。</p>}
+              {form.comparableTransactions.length === 0 && <p className="rounded-xl border border-dashed border-[#dcd9d1] px-4 py-5 text-center text-sm text-[#8a8c87]">尚未添加成交参考，可稍后编辑房源补充。</p>}
             </div>
           </div>
         </CardContent>

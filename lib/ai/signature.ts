@@ -44,5 +44,5 @@ export function stableSerializeAIInput(value: unknown): string {
 /** Stable cache identity, not a cryptographic or authentication primitive. */
 export function createAIInputSignature(context: AIAnalysisContext): string {
   const serialized = stableSerializeAIInput(context);
-  return `aia-v8-${fnv1a32(serialized, 0x811c9dc5)}${fnv1a32(serialized, 0x9e3779b9)}`;
+  return `aia-v9-${fnv1a32(serialized, 0x811c9dc5)}${fnv1a32(serialized, 0x9e3779b9)}`;
 }

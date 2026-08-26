@@ -258,60 +258,38 @@ export function scoreCommercialAmenities(context: ScoringContext): DimensionEval
   if (!isUsableGeoEvidence(geo)) {
     return unknown(context, "commercial_amenities", ["可靠地址与高德地图商业配套证据"]);
   }
-  const count = geo.countWithin1000m;
-  const baseScore = count >= 20 ? 90 : count >= 10 ? 80 : count >= 5 ? 65 : count >= 1 ? 45 : 20;
+  const count = geo.countWithin2000m;
+  const distance = geo.nearestDistanceMeters;
+  const distanceScore = count === 0 || distance === undefined ? 20 : distance <= 800 ? 92 : distance <= 1_500 ? 82 : distance <= 2_000 ? 68 : 30;
+  const countAdjustment = count >= 4 ? 8 : count >= 2 ? 5 : 0;
   return evaluation(context, "commercial_amenities", {
-    score: Math.min(100, baseScore + (geo.hasMajorDestination ? 10 : 0)),
+    score: Math.min(100, distanceScore + countAdjustment),
     status: geoDimensionStatus(geo.status),
     evidence: [{
       source: "amap",
       quality: geoEvidenceQuality(geo.quality),
-      description: `${geo.observation}${geo.hasMajorDestination ? "，检测到主要商场或商业综合体" : ""}${geo.examples.length > 0 ? `；示例：${geo.examples.join("、")}` : ""}。来源：高德地图`,
+      description: `${geo.observation}${geo.examples.length > 0 ? `；有效商业体：${geo.examples.join("、")}` : ""}。来源：高德地图`,
     }],
     missingInputs: geo.status === "partial" ? ["地址定位精度为街道级，POI 结果仅作阶段性参考"] : [],
   });
 }
 
-function supermarketScore(count: number): number {
-  return count >= 5 ? 100 : count >= 3 ? 80 : count >= 1 ? 60 : 20;
-}
-
-function medicalScore(count: number): number {
-  return count >= 3 ? 100 : count === 2 ? 80 : count === 1 ? 60 : 20;
-}
-
-function parkScore(count: number): number {
-  return count >= 2 ? 100 : count === 1 ? 70 : 30;
-}
-
-export function scoreDailyLifeAmenities(context: ScoringContext): DimensionEvaluation {
-  const geo = context.geoEvidence?.daily_life_amenities;
+export function scoreMedicalAmenities(context: ScoringContext): DimensionEvaluation {
+  const geo = context.geoEvidence?.medical_amenities;
   if (!isUsableGeoEvidence(geo)) {
-    return unknown(context, "daily_life_amenities", ["可靠地址与高德地图生活配套证据"]);
+    return unknown(context, "medical_amenities", ["可靠地址与高德地图正规医院证据"]);
   }
-  const requiredCategories = ["supermarket", "medical", "park"] as const;
-  const missingCategories = requiredCategories.filter((category) => !geo.availableCategories.includes(category));
-  if (missingCategories.length > 0) {
-    const labels = { supermarket: "超市", medical: "医疗", park: "公园" } as const;
-    return partial(
-      context,
-      "daily_life_amenities",
-      [{ source: "amap", quality: geoEvidenceQuality(geo.quality), description: `${geo.observation}。来源：高德地图` }],
-      [`${missingCategories.map((category) => labels[category]).join("、")}分类请求暂不可用`],
-    );
-  }
-  const score = Math.round(
-    supermarketScore(geo.supermarketCount) * 0.4 +
-    medicalScore(geo.medicalCount) * 0.35 +
-    parkScore(geo.parkCount) * 0.25,
-  );
-  return evaluation(context, "daily_life_amenities", {
-    score,
+  const count = geo.hospitalCountWithin3000m;
+  const distance = geo.nearestDistanceMeters;
+  const distanceScore = count === 0 || distance === undefined ? 20 : distance <= 1_500 ? 85 : distance <= 3_000 ? 70 : 30;
+  const countAdjustment = count >= 3 ? 12 : count === 2 ? 8 : 0;
+  return evaluation(context, "medical_amenities", {
+    score: Math.min(100, distanceScore + countAdjustment),
     status: geoDimensionStatus(geo.status),
     evidence: [{
       source: "amap",
       quality: geoEvidenceQuality(geo.quality),
-      description: `${geo.observation}${geo.examples.length > 0 ? `；示例：${geo.examples.join("、")}` : ""}。来源：高德地图`,
+      description: `${geo.observation}${geo.examples.length > 0 ? `；医院：${geo.examples.join("、")}` : ""}。来源：高德地图；未据此推断医院等级`,
     }],
     missingInputs: geo.status === "partial" ? ["地址定位精度为街道级，POI 结果仅作阶段性参考"] : [],
   });
@@ -619,7 +597,7 @@ function scoreUnscoredDimension(context: ScoringContext, key: DimensionKey): Dim
     public_transport: "公共交通证据",
     commercial_amenities: "商业配套证据",
     education: "学校信息",
-    daily_life_amenities: "日常生活配套证据",
+    medical_amenities: "正规医院可达性证据",
     layout_design: "户型图或结构化空间证据",
     space_match: "家庭空间需求",
     building_age: "交付年份",
@@ -641,7 +619,7 @@ export function evaluateDimensions(context: ScoringContext): DimensionEvaluation
     else if (key === "commute") result = scoreCommute(context);
     else if (key === "public_transport") result = scorePublicTransport(context);
     else if (key === "commercial_amenities") result = scoreCommercialAmenities(context);
-    else if (key === "daily_life_amenities") result = scoreDailyLifeAmenities(context);
+    else if (key === "medical_amenities") result = scoreMedicalAmenities(context);
     else if (key === "building_age") result = scoreBuildingAge(context);
     else if (key === "transaction_price_reasonableness") result = scoreTransactionPriceReasonableness(context);
     else if (key === "education") result = scoreEducation(context);

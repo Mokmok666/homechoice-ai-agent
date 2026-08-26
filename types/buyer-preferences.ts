@@ -44,6 +44,7 @@ export const DECISION_PRIORITIES = [
   "property_management",
   "education",
   "commercial_amenities",
+  "medical_amenities",
   "public_transport",
   "liquidity",
   "value_preservation",

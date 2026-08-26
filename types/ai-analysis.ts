@@ -100,8 +100,8 @@ export interface AIGeoEvidenceContext {
     busStopCountWithin500m: number | null;
     busStopCountWithin800m: number | null;
   } | null;
-  commercial: { countWithin1000m: number; hasMajorDestination: boolean; examples: string[] } | null;
-  dailyLife: { supermarketCount: number; medicalCount: number; parkCount: number; examples: string[] } | null;
+  commercial: { countWithin2000m: number; nearestDistanceMeters: number | null; nearestName: string | null; examples: string[] } | null;
+  medical: { hospitalCountWithin3000m: number; nearestDistanceMeters: number | null; nearestName: string | null; examples: string[] } | null;
   commute: {
     primary: AICommutePersonContext | null;
     partner: AICommutePersonContext | null;

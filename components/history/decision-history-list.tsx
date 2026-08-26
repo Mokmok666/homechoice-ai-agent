@@ -32,7 +32,7 @@ export function DecisionHistoryList() {
         <div className="max-w-md">
           <span className="mx-auto grid size-16 place-items-center rounded-full bg-[#f1f3ed] text-[#687a61]"><Clock3 size={28} /></span>
           <h2 className="mt-5 text-xl font-semibold">还没有保存过决策</h2>
-          <p className="mt-3 text-sm leading-7 text-[#777a74]">完成一次房源分析后，这里会保存你的选择依据，方便之后回顾。</p>
+          <p className="mt-3 text-[15px] leading-7 text-[#777a74]">完成一次房源分析后，这里会保存你的选择依据，方便之后回顾。</p>
           <Link href="/results" className="pill mx-auto mt-6 w-fit">前往分析结果 <ArrowRight size={16} /></Link>
         </div>
       </section>
@@ -49,7 +49,7 @@ export function DecisionHistoryList() {
           <article key={record.id} className="card grid gap-5 p-5 sm:p-6 lg:grid-cols-[190px_1fr_250px] lg:items-center">
             <div className="flex items-center gap-4">
               <span className="grid size-12 shrink-0 place-items-center rounded-full bg-[#f1efeb] text-[#74816d]"><CalendarDays size={21} /></span>
-              <div><p className="text-xs text-[#8a8d87]">保存时间</p><p className="mt-1 text-sm font-medium">{formatSavedAt(record.createdAt)}</p></div>
+              <div><p className="text-[13px] text-[#8a8d87]">保存时间</p><p className="mt-1 text-[15px] font-medium">{formatSavedAt(record.createdAt)}</p></div>
             </div>
             <div className="min-w-0">
               <h2 className="truncate font-serif text-xl">{record.title}</h2>
@@ -57,12 +57,12 @@ export function DecisionHistoryList() {
             </div>
             <div>
               <div className="rounded-xl bg-[#f5f5f1] p-3 text-sm">
-                <span className="flex items-center gap-2 text-xs text-[#687a61]"><Star size={14} />当时首选</span>
+                <span className="flex items-center gap-2 text-[13px] text-[#687a61]"><Star size={14} />当时首选</span>
                 <b className="mt-1 block truncate">{topProperty?.name ?? "暂无明确首选"}</b>
                 {topResult && <p className={`mt-2 w-fit rounded-full px-2.5 py-1 text-xs font-medium ${RECOMMENDATION_BADGE_STYLES[topResult.recommendation]}`}>{RECOMMENDATION_LABELS[topResult.recommendation]} · 匹配度 {topResult.overallScore ?? "—"}</p>}
               </div>
               <div className="mt-3 flex items-center justify-end gap-3">
-                <button type="button" onClick={() => setPendingDelete(record)} className="inline-flex items-center gap-1.5 text-xs text-[#9b5a50] transition hover:text-[#7f4038]" aria-label={`删除 ${record.title}`}><Trash2 size={14} />删除</button>
+                <button type="button" onClick={() => setPendingDelete(record)} className="inline-flex items-center gap-1.5 text-[13px] text-[#9b5a50] transition hover:text-[#7f4038]" aria-label={`删除 ${record.title}`}><Trash2 size={14} />删除</button>
                 <Link href={`/history/${record.id}`} className="flex items-center gap-2 text-sm text-[#617359]">查看历史快照 <ArrowRight size={15} /></Link>
               </div>
             </div>

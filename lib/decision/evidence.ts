@@ -79,8 +79,8 @@ export function buildEvidenceItems(
   ));
 
   evidence.push(
-    item("ai-commercial", "商业成熟度", "ai_inferred", "未来结合周边商业层级、距离与日常可达性分析", "AI分析"),
-    item("ai-daily-life", "日常生活便利", "ai_inferred", "未来结合生活服务设施与使用场景分析", "AI分析"),
+    item("ai-commercial", "商业配套", "ai_inferred", "结合两公里内大型商场、购物中心和商业综合体的距离与数量分析", "外部证据"),
+    item("ai-medical", "医疗配套", "ai_inferred", "结合三公里内正规医院的距离与数量分析，不推断医院等级", "外部证据"),
     item("ai-community", "小区品质", "ai_inferred", "未来结合小区环境、维护状态与公共空间分析", "AI分析"),
     item("ai-liquidity", "流动性", "ai_inferred", "未来结合供需、户型受众与成交活跃度分析", "AI分析"),
     item("ai-value", "长期保值", "ai_inferred", "未来结合区域产业、交通和人口趋势分析", "AI分析"),

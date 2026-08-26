@@ -280,16 +280,16 @@ export function DecisionResults() {
                 <p className="mt-4 text-base leading-8 text-[#60655e]">“{decisionSummary}”</p>
               </div>
               <div className="flex items-center gap-4 rounded-2xl bg-white/75 p-4 shadow-sm">
-                <div className="text-right"><span className="text-xs text-[#8a8c87]">当前匹配度</span><b className="mt-1 block font-serif text-4xl text-[#607158]">{winner.overallScore ?? "—"}<small className="ml-1 text-base">{winner.overallScore !== null ? "%" : ""}</small></b><small className="text-[10px] text-[#92948f]">基于当前已知信息</small></div>
+                <div className="text-right"><span className="text-[13px] text-[#8a8c87]">当前匹配度</span><b className="mt-1 block font-serif text-4xl text-[#607158]">{winner.overallScore ?? "—"}<small className="ml-1 text-base">{winner.overallScore !== null ? "%" : ""}</small></b><small className="text-xs text-[#92948f]">基于当前已知信息</small></div>
               </div>
             </div>
             <div className="mt-7 grid gap-3 sm:grid-cols-2 lg:max-w-2xl">
               <PriceBlock label="挂牌价" value={winnerProperty.listingPrice} />
               <PriceBlock label="预期成交价" value={winnerProperty.totalPrice} emphasized />
             </div>
-            {winnerProperty.listingPrice && <p className="mt-3 text-xs text-[#777b74]">挂牌与预期成交相差约 {Math.abs(Math.round(winnerProperty.listingPrice - winnerProperty.totalPrice))} 万元（{Math.abs(((winnerProperty.listingPrice - winnerProperty.totalPrice) / winnerProperty.listingPrice) * 100).toFixed(1)}%），仅为当前决策假设差额。</p>}
+            {winnerProperty.listingPrice && <p className="mt-3 text-[13px] leading-5 text-[#777b74]">挂牌与预期成交相差约 {Math.abs(Math.round(winnerProperty.listingPrice - winnerProperty.totalPrice))} 万元（{Math.abs(((winnerProperty.listingPrice - winnerProperty.totalPrice) / winnerProperty.listingPrice) * 100).toFixed(1)}%），仅为当前决策假设差额。</p>}
           </div>
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-[#ebe8e0] px-6 py-4 text-xs text-[#7a7d77] sm:px-8">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-[#ebe8e0] px-6 py-4 text-[13px] text-[#7a7d77] sm:px-8">
             <span>当前信息完整度 {winner.confidence.dataCompletenessPercent}%</span>
             <span>公开证据 {winnerExternalCoverage.completed}/{winnerExternalCoverage.total}</span>
             <span>分析可信度 {winner.confidence.analysisConfidence === "supported" ? "较充分" : "阶段性"}</span>
@@ -303,27 +303,27 @@ export function DecisionResults() {
 
       {state.preferences && <AIAnalysisPanel properties={state.properties} preferences={state.preferences} engine={state.engine} geoEvidenceByProperty={state.geoEvidenceByProperty} webEvidenceByProperty={state.webEvidenceByProperty} />}
 
-      {winningReasons.length > 0 && <section className="mt-8"><SectionHeading eyebrow="Decision reasons" title="为什么更适合您" description="结合您的购房偏好、当前权重和候选房源的实际差异，以下是该房源排名第一的主要原因。" /><div className="mt-4 grid gap-4 md:grid-cols-3">{winningReasons.map((reason, index) => <article key={reason.title} className="card p-5"><div className="flex items-center justify-between gap-3"><span className="grid size-8 place-items-center rounded-full bg-[#eef2eb] text-sm font-semibold text-[#607158]">{index + 1}</span>{reason.label && <span className="rounded-full bg-[#f3f4ef] px-2.5 py-1 text-[10px] font-medium text-[#677360]">{reason.label}</span>}</div><h3 className="mt-4 font-semibold">{reason.title}</h3><p className="mt-2 text-sm leading-7 text-[#6d706b]">{reason.description}</p></article>)}</div></section>}
+      {winningReasons.length > 0 && <section className="mt-6"><SectionHeading eyebrow="Decision reasons" title="为什么更适合您" description="结合您的购房偏好、当前权重和候选房源的实际差异，以下是该房源排名第一的主要原因。" /><div className="mt-4 grid gap-4 md:grid-cols-3">{winningReasons.map((reason, index) => <article key={reason.title} className="card p-4 sm:p-5"><div className="flex items-center justify-between gap-3"><span className="grid size-8 place-items-center rounded-full bg-[#eef2eb] text-sm font-semibold text-[#607158]">{index + 1}</span>{reason.label && <span className="rounded-full bg-[#f3f4ef] px-2.5 py-1 text-xs font-medium text-[#677360]">{reason.label}</span>}</div><h3 className="mt-4 text-[17px] font-semibold">{reason.title}</h3><p className="mt-2 text-[15px] leading-[1.7] text-[#6d706b]">{reason.description}</p></article>)}</div></section>}
 
-      <section className="mt-8">
+      <section className="mt-6">
         <SectionHeading eyebrow="Quick comparison" title="候选房源快速比较" />
         <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {comparisons.map((item) => <ComparisonCard key={item.property.id} item={item} />)}
         </div>
       </section>
 
-      {decisionRisks.length > 0 && winnerProperty && <section className="card mt-8 p-6 sm:p-8"><SectionHeading eyebrow="Before buying" title="买之前还需要确认" description="补充这些事实可以提高判断可信度，但不会阻止当前推荐。" /><div className="mt-5 grid gap-3 md:grid-cols-2">{decisionRisks.map((risk) => <article key={risk.title} className="rounded-xl bg-[#faf8f3] p-4"><div className="flex gap-3"><CircleAlert size={18} className="mt-0.5 shrink-0 text-[#8a7046]" /><div><h3 className="text-sm font-semibold">{risk.title}</h3><p className="mt-1 text-xs leading-6 text-[#74766f]">{risk.description}</p><ul className="mt-2 space-y-1 text-xs leading-5 text-[#696c67]">{risk.suggestions.map((suggestion) => <li key={suggestion}>· {suggestion}</li>)}</ul><Button asChild className="mt-3 h-9 bg-white px-3 text-xs text-[#5d7056] ring-1 ring-[#dcdad4] hover:bg-[#f3f4ef]"><Link href={`/properties/new?id=${winnerProperty.id}#${risk.focusTarget}`}>补充信息</Link></Button></div></div></article>)}</div></section>}
+      {decisionRisks.length > 0 && winnerProperty && <section className="card mt-6 p-6 sm:p-7"><SectionHeading eyebrow="Before buying" title="买之前还需要确认" description="补充这些事实可以提高判断可信度，但不会阻止当前推荐。" /><div className="mt-5 grid gap-3 md:grid-cols-2">{decisionRisks.map((risk) => <article key={risk.title} className="rounded-xl bg-[#faf8f3] p-4"><div className="flex gap-3"><CircleAlert size={18} className="mt-0.5 shrink-0 text-[#8a7046]" /><div><h3 className="text-base font-semibold">{risk.title}</h3><p className="mt-1 text-sm leading-6 text-[#74766f]">{risk.description}</p><ul className="mt-2 space-y-1 text-sm leading-6 text-[#696c67]">{risk.suggestions.map((suggestion) => <li key={suggestion}>· {suggestion}</li>)}</ul><Button asChild className="mt-3 h-9 bg-white px-3 text-sm text-[#5d7056] ring-1 ring-[#dcdad4] hover:bg-[#f3f4ef]"><Link href={`/properties/new?id=${winnerProperty.id}#${risk.focusTarget}`}>补充信息</Link></Button></div></div></article>)}</div></section>}
 
-      <details className="card group mt-7 p-6 sm:p-8">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-4"><div><p className="text-xs font-medium uppercase tracking-[0.16em] text-[#75886d]">Detailed evidence</p><h2 className="mt-1 font-serif text-2xl">查看完整 15 维分析</h2><p className="mt-2 text-xs leading-5 text-[#7b7e78]">按房源查看全部维度、证据来源、权重与仍需确认的信息。</p></div><ChevronDown className="shrink-0 text-[#75886d] transition group-open:rotate-180" /></summary>
+      <details className="card group mt-6 p-6 sm:p-7">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-4"><div><p className="text-xs font-medium uppercase tracking-[0.16em] text-[#75886d]">Detailed evidence</p><h2 className="mt-1 font-serif text-2xl">查看完整 15 维分析</h2><p className="mt-2 text-sm leading-6 text-[#7b7e78]">按房源查看全部维度、证据来源、权重与仍需确认的信息。</p></div><ChevronDown className="shrink-0 text-[#75886d] transition group-open:rotate-180" /></summary>
         <div className="mt-5 grid gap-3 border-t border-[#eceae5] pt-5 sm:grid-cols-2 lg:grid-cols-3">{comparisons.map((item) => <Link key={item.property.id} href={`/results/${item.property.id}`} className="flex items-center justify-between rounded-xl bg-[#f7f6f2] p-4 text-sm font-medium text-[#607158]"><span>第 {item.rank} 位 · {item.property.name}</span><ArrowRight size={16} /></Link>)}</div>
       </details>
 
       <section className="mt-7 flex flex-col gap-4 rounded-2xl border border-[#e3e5de] bg-[#f7f9f5] p-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="font-semibold">保存当前决策快照</h2>
-          <p className="mt-1 text-xs leading-5 text-[#747772]">保存当前房源、购房偏好和分析结果，后续资料变化不会影响这份记录。</p>
-          {saveStatus === "error" && <p className="mt-2 text-xs text-[#9a5d50]">保存失败，请检查浏览器存储空间后重试。</p>}
+          <p className="mt-1 text-sm leading-6 text-[#747772]">保存当前房源、购房偏好和分析结果，后续资料变化不会影响这份记录。</p>
+          {saveStatus === "error" && <p className="mt-2 text-[13px] text-[#9a5d50]">保存失败，请检查浏览器存储空间后重试。</p>}
         </div>
         <Button type="button" onClick={handleSaveDecision} disabled={saveStatus === "saved"} className="shrink-0">
           {saveStatus === "saved" ? <Check size={16} /> : <Save size={16} />}
@@ -340,12 +340,12 @@ function PriceBlock({ label, value, emphasized = false }: { label: string; value
 }
 
 function SectionHeading({ eyebrow, title, description }: { eyebrow: string; title: string; description?: string }) {
-  return <div><p className="text-xs font-medium uppercase tracking-[0.16em] text-[#75886d]">{eyebrow}</p><h2 className="mt-1 font-serif text-2xl">{title}</h2>{description && <p className="mt-2 text-xs leading-5 text-[#7b7e78]">{description}</p>}</div>;
+  return <div><p className="text-xs font-medium uppercase tracking-[0.16em] text-[#75886d]">{eyebrow}</p><h2 className="mt-1 font-serif text-2xl">{title}</h2>{description && <p className="mt-2 text-sm leading-6 text-[#7b7e78]">{description}</p>}</div>;
 }
 
 function ComparisonCard({ item }: { item: ReturnType<typeof buildQuickComparison>[number] }) {
   const recommendation = RECOMMENDATION_LABELS[item.result.recommendation];
-  return <Link href={`/results/${item.property.id}`} className={`card p-5 transition hover:-translate-y-0.5 ${item.rank === 1 ? "ring-1 ring-[#aebda8]" : ""}`}><div className="flex items-start justify-between gap-3"><div><span className="text-xs font-medium text-[#75886d]">第 {item.rank} 位</span><h3 className="mt-1 text-lg font-semibold">{item.property.name}</h3></div><span className={`rounded-full px-3 py-1 text-xs font-medium ${RECOMMENDATION_BADGE_STYLES[item.result.recommendation]}`}>{item.result.overallScore ?? "—"}% · {recommendation}</span></div><div className="mt-4 grid grid-cols-2 gap-3 text-xs"><CompactFact label="挂牌价" value={item.property.listingPrice ? `${item.property.listingPrice} 万` : "未填写"} /><CompactFact label="预期成交" value={`${item.property.totalPrice} 万`} /><CompactFact label="面积 / 户型" value={`${item.property.area}㎡ · ${item.property.layout}`} /><CompactFact label="家庭通勤" value={formatCommute(item.primaryCommuteMinutes, item.partnerCommuteMinutes)} /></div><div className="mt-4 space-y-2 border-t border-[#eceae5] pt-4 text-xs leading-5"><p><b className="text-[#607158]">优势：</b>{item.keyAdvantage}</p><p><b className="text-[#8a7046]">待确认：</b>{item.keyRisk}</p></div></Link>;
+  return <Link href={`/results/${item.property.id}`} className={`card p-4 transition hover:-translate-y-0.5 sm:p-5 ${item.rank === 1 ? "ring-1 ring-[#aebda8]" : ""}`}><div className="flex items-start justify-between gap-3"><div><span className="text-[13px] font-medium text-[#75886d]">第 {item.rank} 位</span><h3 className="mt-1 text-lg font-semibold">{item.property.name}</h3></div><span className={`rounded-full px-3 py-1 text-xs font-medium ${RECOMMENDATION_BADGE_STYLES[item.result.recommendation]}`}>{item.result.overallScore ?? "—"}% · {recommendation}</span></div><div className="mt-4 grid grid-cols-2 gap-3 text-sm"><CompactFact label="挂牌价" value={item.property.listingPrice ? `${item.property.listingPrice} 万` : "未填写"} /><CompactFact label="预期成交" value={`${item.property.totalPrice} 万`} /><CompactFact label="面积 / 户型" value={`${item.property.area}㎡ · ${item.property.layout}`} /><CompactFact label="家庭通勤" value={formatCommute(item.primaryCommuteMinutes, item.partnerCommuteMinutes)} /></div><div className="mt-4 space-y-2 border-t border-[#eceae5] pt-4 text-sm leading-6"><p><b className="text-[#607158]">优势：</b>{item.keyAdvantage}</p><p><b className="text-[#8a7046]">待确认：</b>{item.keyRisk}</p></div></Link>;
 }
 
 function CompactFact({ label, value }: { label: string; value: string }) {

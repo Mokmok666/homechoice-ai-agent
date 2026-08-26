@@ -9,7 +9,7 @@ export const DIMENSION_KEYS = [
   "public_transport",
   "commercial_amenities",
   "education",
-  "daily_life_amenities",
+  "medical_amenities",
   "layout_design",
   "space_match",
   "building_age",
@@ -96,12 +96,19 @@ export interface HardMismatch {
   reason: string;
 }
 
+export type DecisionReasonType =
+  | "DIFFERENTIATOR"
+  | "PREFERENCE_MATCH"
+  | "SUPPORTING_FACTOR";
+
 export interface DecisionReason {
   title: string;
   description: string;
   dimension: DimensionKey;
   confidence: "high" | "medium" | "low";
-  label?: "您的重点偏好" | "关键差异" | "强证据支持";
+  /** Optional so decision-history snapshots created before this field remain readable. */
+  type?: DecisionReasonType;
+  label?: "关键优势" | "您的重点偏好" | "综合支撑" | "关键差异" | "强证据支持";
 }
 
 export interface PropertyDecisionResult {
@@ -125,7 +132,7 @@ export interface DecisionEngineInput {
 }
 
 export interface DecisionEngineResult {
-  engineVersion: "decision-engine-v1" | "decision-engine-v2";
+  engineVersion: "decision-engine-v1" | "decision-engine-v2" | "decision-engine-v2.1";
   asOfDate: string;
   weights: Record<DimensionKey, number>;
   results: PropertyDecisionResult[];

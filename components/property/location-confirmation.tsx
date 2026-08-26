@@ -203,7 +203,7 @@ export function LocationConfirmation({
           </Button>
         </div>
         {errors.address && <p className="mt-2 text-xs text-[#a34f43]">{errors.address}</p>}
-        <p className="mt-2 text-xs leading-5 text-[#777a74]">无需填写门牌号。确认后，后续位置分析将优先使用该高德位置。</p>
+        <p className="mt-2 text-sm leading-6 text-[#777a74]">无需填写门牌号。确认后，后续位置分析将优先使用该高德位置。</p>
         {searchError && <p className="mt-3 rounded-lg bg-[#fff7f5] px-4 py-3 text-sm text-[#934b40]">{searchError}</p>}
       </div>
 
@@ -217,7 +217,7 @@ export function LocationConfirmation({
       {candidates.length > 0 && <div className="lg:col-span-2 space-y-3">
         <p className="text-sm font-semibold text-[#31342f]">请选择正确的位置</p>
         {candidates.map((candidate) => <div key={candidate.poiId ?? `${candidate.name}-${candidate.lng}`} className="flex flex-col gap-4 rounded-xl border border-[#e4e2dc] bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div><p className="font-medium text-[#252822]">{candidate.name}</p><p className="mt-1 text-sm text-[#747871]">{candidate.formattedAddress}</p><p className="mt-1 text-xs text-[#8b8e88]">{candidate.district}</p></div>
+          <div><p className="text-[15px] font-medium text-[#252822]">{candidate.name}</p><p className="mt-1 text-sm leading-6 text-[#747871]">{candidate.formattedAddress}</p><p className="mt-1 text-[13px] text-[#8b8e88]">{candidate.district}</p></div>
           <Button type="button" className="h-9 border border-[#9cac94] bg-white px-4 text-[#5f7357] hover:bg-[#f2f5f0]" onClick={() => confirm(candidate)}>选择此位置</Button>
         </div>)}
         <button type="button" className="text-sm text-[#6d8065] hover:underline" onClick={() => { setCandidates([]); setSearchError(""); }}>没有找到正确位置，重新填写</button>

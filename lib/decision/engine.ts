@@ -13,7 +13,7 @@ import { evaluateDimensions } from "./scorers";
 import { makeRecommendation } from "./recommendation";
 import { calculateWeights } from "./weights";
 
-export const DECISION_ENGINE_VERSION = "decision-engine-v2" as const;
+export const DECISION_ENGINE_VERSION = "decision-engine-v2.1" as const;
 
 function assertValidInput(properties: Property[], preferences: BuyerPreferences, asOfDate: string): void {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(asOfDate) || !Number.isFinite(Date.parse(`${asOfDate}T00:00:00Z`))) {

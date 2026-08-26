@@ -166,15 +166,16 @@ function projectGeoEvidence(
       busStopCountWithin800m: finiteOrNull(evidence.public_transport.busStopCountWithin800m),
     } : null,
     commercial: evidence.commercial_amenities ? {
-      countWithin1000m: evidence.commercial_amenities.countWithin1000m,
-      hasMajorDestination: evidence.commercial_amenities.hasMajorDestination,
+      countWithin2000m: evidence.commercial_amenities.countWithin2000m,
+      nearestDistanceMeters: finiteOrNull(evidence.commercial_amenities.nearestDistanceMeters),
+      nearestName: evidence.commercial_amenities.nearestName ?? null,
       examples: [...evidence.commercial_amenities.examples],
     } : null,
-    dailyLife: evidence.daily_life_amenities ? {
-      supermarketCount: evidence.daily_life_amenities.supermarketCount,
-      medicalCount: evidence.daily_life_amenities.medicalCount,
-      parkCount: evidence.daily_life_amenities.parkCount,
-      examples: [...evidence.daily_life_amenities.examples],
+    medical: evidence.medical_amenities ? {
+      hospitalCountWithin3000m: evidence.medical_amenities.hospitalCountWithin3000m,
+      nearestDistanceMeters: finiteOrNull(evidence.medical_amenities.nearestDistanceMeters),
+      nearestName: evidence.medical_amenities.nearestName ?? null,
+      examples: [...evidence.medical_amenities.examples],
     } : null,
     commute: evidence.commute ? {
       primary: projectPersonCommute(evidence.commute.primary, primaryPreference),

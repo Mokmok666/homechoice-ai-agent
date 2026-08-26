@@ -53,7 +53,7 @@ export function PropertyList() {
       <div className="mt-7 flex flex-col gap-4 rounded-2xl border border-[#e5e3dd] bg-white/60 p-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm font-medium">已添加 {properties.length} / {MAX_PROPERTIES} 套候选房源</p>
-          <p className="mt-1 text-xs text-[#858782]">房源保存在当前浏览器中，清除浏览器数据后将无法恢复。</p>
+          <p className="mt-1 text-sm text-[#858782]">房源保存在当前浏览器中，清除浏览器数据后将无法恢复。</p>
         </div>
         {properties.length < MAX_PROPERTIES ? (
           <Button asChild className="shrink-0 bg-white text-[#353833] ring-1 ring-[#dbdad5] hover:bg-[#f4f3ee]">
@@ -65,7 +65,7 @@ export function PropertyList() {
       </div>
 
       {properties.length === 0 ? (
-        <Card className="mt-8 grid min-h-80 place-items-center p-8 text-center">
+        <Card className="mt-6 grid min-h-72 place-items-center p-7 text-center">
           <div>
             <span className="mx-auto grid size-16 place-items-center rounded-full bg-[#f0f2ed] text-[#687b60]"><Building2 size={28} /></span>
             <h2 className="mt-5 text-xl font-semibold">还没有候选房源</h2>
@@ -74,7 +74,7 @@ export function PropertyList() {
           </div>
         </Card>
       ) : (
-        <div className="mt-8 grid gap-5 lg:grid-cols-2">
+        <div className="mt-6 grid gap-5 lg:grid-cols-2">
           {properties.map((property) => (
             <Card key={property.id} className="overflow-hidden transition hover:-translate-y-0.5 hover:shadow-[0_14px_38px_rgba(58,55,46,0.08)]">
               <article className="grid min-h-56 sm:grid-cols-[190px_1fr]">
@@ -95,16 +95,16 @@ export function PropertyList() {
                         <span>{property.city} · {property.district} · {property.address}</span>
                       </p>
                     </div>
-                    <span className={`shrink-0 rounded-full px-3 py-1.5 text-[11px] font-medium ${STATUS_STYLES[property.status]}`}>{STATUS_LABELS[property.status]}</span>
+                    <span className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium ${STATUS_STYLES[property.status]}`}>{STATUS_LABELS[property.status]}</span>
                   </div>
 
                   <div className="mt-5 grid grid-cols-3 gap-3 border-y border-[#eceae5] py-4">
-                    <div><span className="block text-xs text-[#92938f]">预期成交价</span><b className="mt-1 block font-serif text-xl text-[#53674d]">{property.totalPrice} 万</b></div>
-                    <div><span className="block text-xs text-[#92938f]">面积</span><b className="mt-1 block text-sm">{property.area}㎡</b></div>
-                    <div><span className="block text-xs text-[#92938f]">户型</span><b className="mt-1 block text-sm">{property.layout}</b></div>
+                    <div><span className="block text-[13px] text-[#92938f]">预期成交价</span><b className="mt-1 block font-serif text-xl text-[#53674d]">{property.totalPrice} 万</b></div>
+                    <div><span className="block text-[13px] text-[#92938f]">面积</span><b className="mt-1 block text-[15px]">{property.area}㎡</b></div>
+                    <div><span className="block text-[13px] text-[#92938f]">户型</span><b className="mt-1 block text-[15px]">{property.layout}</b></div>
                   </div>
 
-                  <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3 text-xs text-[#757873]">
+                  <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3 text-sm text-[#757873]">
                     <span>{property.floor}</span>
                     <span className="flex items-center gap-1.5"><TrainFront size={14} />{property.metroDistance === null ? "地铁距离可进一步确认" : `距地铁约 ${property.metroDistance} 米`}</span>
                     <div className="ml-auto flex items-center gap-2">

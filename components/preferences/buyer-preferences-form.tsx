@@ -138,7 +138,7 @@ function ChoiceButton({ selected, disabled = false, onClick, children, described
       aria-describedby={describedBy}
       disabled={disabled}
       onClick={onClick}
-      className={`flex min-h-12 items-center gap-3 rounded-xl border px-4 text-left text-sm transition ${selected ? "border-[#798d72] bg-[#f1f4ef] text-[#53664d] shadow-[inset_0_0_0_1px_rgba(121,141,114,.12)]" : "border-[#deddd8] bg-white text-[#4e514c] hover:border-[#a8b3a3]"} disabled:cursor-not-allowed disabled:opacity-45`}
+      className={`flex min-h-12 items-center gap-3 rounded-xl border px-4 text-left text-[15px] transition ${selected ? "border-[#798d72] bg-[#f1f4ef] text-[#53664d] shadow-[inset_0_0_0_1px_rgba(121,141,114,.12)]" : "border-[#deddd8] bg-white text-[#4e514c] hover:border-[#a8b3a3]"} disabled:cursor-not-allowed disabled:opacity-45`}
     >
       {children}
       {selected && <Check size={16} className="ml-auto shrink-0" />}
@@ -271,7 +271,7 @@ export function BuyerPreferencesForm() {
         <div className="space-y-6">
           <Card>
             <SectionHeading number="01" title="购房目标" description="选择最符合这次购房决策的主要目标。" />
-            <CardContent className="grid gap-3 px-6 py-7 sm:grid-cols-3 sm:px-8" aria-invalid={Boolean(errors.purchasePurpose)} aria-describedby={errors.purchasePurpose ? "purchasePurpose-error" : undefined}>
+            <CardContent className="grid gap-3 px-6 py-6 sm:grid-cols-3 sm:px-8" aria-invalid={Boolean(errors.purchasePurpose)} aria-describedby={errors.purchasePurpose ? "purchasePurpose-error" : undefined}>
               {PURCHASE_PURPOSES.map((purpose) => <ChoiceButton key={purpose} selected={form.purchasePurpose === purpose} onClick={() => updateField("purchasePurpose", purpose)}>{PURCHASE_PURPOSE_LABELS[purpose]}</ChoiceButton>)}
               <div className="sm:col-span-3"><FieldError id="purchasePurpose-error" message={errors.purchasePurpose} /></div>
             </CardContent>
@@ -279,17 +279,17 @@ export function BuyerPreferencesForm() {
 
           <Card>
             <SectionHeading number="02" title="资金约束" description="记录家庭对单套房产总价的最高承受边界。" />
-            <CardContent className="px-6 py-7 sm:px-8">
+            <CardContent className="px-6 py-6 sm:px-8">
               <Label htmlFor="maximumBudget">最高可接受总价（万元）*</Label>
               <div className="relative mt-2 max-w-md"><WalletCards size={17} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#84907e]" /><Input id="maximumBudget" type="number" min="0" step="0.01" inputMode="decimal" className="pl-11" value={form.maximumBudget} onChange={(event) => updateField("maximumBudget", event.target.value)} placeholder="例如：250" {...errorProps("maximumBudget")} /></div>
               <FieldError id="maximumBudget-error" message={errors.maximumBudget} />
-              <p className="mt-4 rounded-xl bg-[#f4f3ef] px-4 py-3 text-xs leading-5 text-[#666962]">房源是否买贵，将根据预期成交价和近期真实成交判断，不由最高预算决定。</p>
+              <p className="mt-4 rounded-xl bg-[#f4f3ef] px-4 py-3 text-sm leading-6 text-[#666962]">房源是否买贵，将根据预期成交价和近期真实成交判断，不由最高预算决定。</p>
             </CardContent>
           </Card>
 
           <Card>
             <SectionHeading number="03" title="家庭通勤" description="记录家庭可接受的通勤方式与时间边界。" />
-            <CardContent className="space-y-6 px-6 py-7 sm:px-8">
+            <CardContent className="space-y-5 px-6 py-6 sm:px-8">
               <div className="grid gap-5 sm:grid-cols-2">
                 <WorkLocationConfirmation id="primaryWorkLocation" label="我的工作地点" required={form.primaryCommuteMode !== "not_important"} keyword={form.primaryWorkLocation} confirmedLocation={form.primaryWorkLocationConfirmed} error={errors.primaryWorkLocation} onKeywordChange={(value) => updateField("primaryWorkLocation", value)} onConfirm={(location) => updateField("primaryWorkLocationConfirmed", location)} />
                 <WorkLocationConfirmation id="partnerWorkLocation" label="伴侣工作地点（选填）" keyword={form.partnerWorkLocation} confirmedLocation={form.partnerWorkLocationConfirmed} error={errors.partnerWorkLocation} onKeywordChange={(value) => updateField("partnerWorkLocation", value)} onConfirm={(location) => updateField("partnerWorkLocationConfirmed", location)} />
@@ -306,13 +306,13 @@ export function BuyerPreferencesForm() {
                   <div><Label htmlFor="partnerMaxCommuteMinutes">伴侣最长可接受时间（分钟）*</Label><Input id="partnerMaxCommuteMinutes" className="mt-2" type="number" min="0" step="1" value={form.partnerMaxCommuteMinutes} onChange={(event) => updateField("partnerMaxCommuteMinutes", event.target.value)} /><FieldError id="partnerMaxCommuteMinutes-error" message={errors.partnerMaxCommuteMinutes} /></div>
                 </div>
               </div>}
-              <p className="rounded-xl bg-[#f4f3ef] px-4 py-3 text-xs leading-5 text-[#666962]">当前阶段只记录你的通勤偏好，真实通勤时间将在后续分析阶段计算。</p>
+              <p className="rounded-xl bg-[#f4f3ef] px-4 py-3 text-sm leading-6 text-[#666962]">当前阶段只记录你的通勤偏好，真实通勤时间将在后续分析阶段计算。</p>
             </CardContent>
           </Card>
 
           <Card>
             <SectionHeading number="04" title="教育需求" description="记录家庭当前或未来的教育需求，不对学校入学资格作任何保证。" />
-            <CardContent className="space-y-6 px-6 py-7 sm:px-8">
+            <CardContent className="space-y-5 px-6 py-6 sm:px-8">
               <div><Label>教育需求 *</Label><div className="mt-2 grid gap-3 sm:grid-cols-3" aria-invalid={Boolean(errors.educationNeed)} aria-describedby={errors.educationNeed ? "educationNeed-error" : undefined}>{EDUCATION_NEEDS.map((need) => <ChoiceButton key={need} selected={form.educationNeed === need} onClick={() => selectEducationNeed(need)}><GraduationCap size={17} />{EDUCATION_NEED_LABELS[need]}</ChoiceButton>)}</div><FieldError id="educationNeed-error" message={errors.educationNeed} /></div>
               {form.educationNeed && form.educationNeed !== "none" && <div><Label>{form.educationNeed === "current" ? "当前主要关注哪个教育阶段？*" : "未来预计关注哪个教育阶段？（选填）"}</Label><div className="mt-2 grid gap-3 sm:grid-cols-2" aria-invalid={Boolean(errors.educationStages)} aria-describedby={errors.educationStages ? "educationStages-error" : undefined}>{EDUCATION_STAGES.map((stage) => <ChoiceButton key={stage} selected={form.educationStages.includes(stage)} onClick={() => toggleEducationStage(stage)}>{EDUCATION_STAGE_LABELS[stage]}</ChoiceButton>)}</div><FieldError id="educationStages-error" message={errors.educationStages} /></div>}
             </CardContent>
@@ -320,7 +320,7 @@ export function BuyerPreferencesForm() {
 
           <Card>
             <SectionHeading number="05" title="希望AI优先考虑的3个因素" description="用于调整15维决策权重，不代表最终推荐理由一定只来自这三项。点击顺序即优先程度。" />
-            <CardContent className="px-6 py-7 sm:px-8">
+            <CardContent className="px-6 py-6 sm:px-8">
               <div className="mb-4 flex items-center justify-between"><Label>决策优先级 *</Label><span className={`rounded-full px-3 py-1 text-sm font-medium ${form.topPriorities.length === 3 ? "bg-[#eaf0e7] text-[#5b7054]" : "bg-[#f1f0eb] text-[#73766f]"}`}>{form.topPriorities.length} / 3</span></div>
               <div className="grid gap-3 sm:grid-cols-2" aria-invalid={Boolean(errors.topPriorities)} aria-describedby={errors.topPriorities ? "topPriorities-error" : undefined}>
                 {DECISION_PRIORITIES.map((priority) => {
@@ -339,7 +339,7 @@ export function BuyerPreferencesForm() {
 
       <div className="mt-7 flex flex-col items-center">
         <Button type="submit" disabled={isSubmitting} className="h-14 w-full max-w-md text-base disabled:cursor-not-allowed disabled:opacity-60">{isSubmitting ? "正在保存…" : "保存偏好并查看分析"}<ArrowRight size={18} /></Button>
-        <div className="mt-3 flex items-center gap-2 text-xs text-[#8a8c87]"><LockKeyhole size={13} />偏好仅保存在当前浏览器，用于后续分析</div>
+        <div className="mt-3 flex items-center gap-2 text-[13px] text-[#8a8c87]"><LockKeyhole size={13} />偏好仅保存在当前浏览器，用于后续分析</div>
       </div>
     </form>
   );

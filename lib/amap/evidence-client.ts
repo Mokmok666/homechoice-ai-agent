@@ -1,6 +1,7 @@
 import {
   GEO_EVIDENCE_SCHEMA_VERSION,
   GEO_EVIDENCE_QUALITY_POLICY_VERSION,
+  GEO_NEARBY_SEMANTICS_VERSION,
   loadCachedPropertyGeoEvidence,
   saveGeoEvidenceCacheEntry,
   type GeoEvidenceCacheEntry,
@@ -12,7 +13,6 @@ import { buildCommuteGeoEvidence, routeModesForPreference } from "@/lib/commute-
 import type { AMapRouteMode, CommuteModeResult, CommutePersonEvidence, GeoEvidenceByProperty, GeoEvidenceQuality, GeoEvidenceStatus, PropertyGeoEvidence } from "@/types/geo-evidence";
 import type { Property } from "@/types/property";
 
-type DailyCategory = "supermarket" | "medical" | "park";
 interface NearbyAvailability { metro: boolean; bus: boolean; commercial: boolean; supermarket: boolean; medical: boolean; park: boolean }
 interface NearbyFetchResult { evidence: PropertyGeoEvidence; availability: NearbyAvailability; fetchedAt?: string }
 interface CommuteFetchResult { evidence?: CommutePersonEvidence; fetchedAt?: string; succeeded: boolean }
@@ -144,28 +144,26 @@ async function fetchNearbyEvidence(property: Property): Promise<NearbyFetchResul
       ...(busCount800 !== undefined ? { busStopCountWithin800m: busCount800 } : {}),
     };
   }
-  if (availability.commercial && isRecord(nearby.commercial) && isNonNegativeInteger(nearby.commercial.countWithin1000m) && typeof nearby.commercial.hasMajorDestination === "boolean" && Array.isArray(nearby.commercial.examples)) {
+  if (availability.commercial && isRecord(nearby.commercial) && isNonNegativeInteger(nearby.commercial.countWithin2000m) && Array.isArray(nearby.commercial.examples)) {
+    const nearest = isRecord(nearby.commercial.nearest) && typeof nearby.commercial.nearest.name === "string" && isNonNegativeInteger(nearby.commercial.nearest.distanceMeters)
+      ? nearby.commercial.nearest : null;
     evidence.commercial_amenities = {
       dimension: "commercial_amenities", source: "amap", fetchedAt, status, quality,
-      observation: `1 公里内识别到 ${nearby.commercial.countWithin1000m} 个商业配套 POI`,
-      countWithin1000m: nearby.commercial.countWithin1000m,
-      hasMajorDestination: nearby.commercial.hasMajorDestination,
+      observation: `2 公里内识别到 ${nearby.commercial.countWithin2000m} 个有效商业体${nearest ? `，最近 ${String(nearest.name).trim()} 约 ${nearest.distanceMeters} 米（直线距离）` : ""}`,
+      countWithin2000m: nearby.commercial.countWithin2000m,
+      ...(nearest ? { nearestName: String(nearest.name).trim(), nearestDistanceMeters: Number(nearest.distanceMeters) } : {}),
       examples: nearby.commercial.examples.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, 5),
     };
   }
-  const availableCategories: DailyCategory[] = [];
-  if (availability.supermarket) availableCategories.push("supermarket");
-  if (availability.medical) availableCategories.push("medical");
-  if (availability.park) availableCategories.push("park");
-  if (availableCategories.length > 0 && isRecord(nearby.dailyLife) && isNonNegativeInteger(nearby.dailyLife.supermarketCount) && isNonNegativeInteger(nearby.dailyLife.medicalCount) && isNonNegativeInteger(nearby.dailyLife.parkCount) && Array.isArray(nearby.dailyLife.examples)) {
-    evidence.daily_life_amenities = {
-      dimension: "daily_life_amenities", source: "amap", fetchedAt,
-      status: availableCategories.length === 3 ? status : "partial", quality,
-      observation: `1 公里内超市 ${nearby.dailyLife.supermarketCount}、医疗 ${nearby.dailyLife.medicalCount}、公园 ${nearby.dailyLife.parkCount}`,
-      supermarketCount: nearby.dailyLife.supermarketCount, medicalCount: nearby.dailyLife.medicalCount,
-      parkCount: nearby.dailyLife.parkCount,
-      examples: nearby.dailyLife.examples.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, 5),
-      availableCategories,
+  if (availability.medical && isRecord(nearby.medical) && isNonNegativeInteger(nearby.medical.hospitalCountWithin3000m) && Array.isArray(nearby.medical.examples)) {
+    const nearest = isRecord(nearby.medical.nearest) && typeof nearby.medical.nearest.name === "string" && isNonNegativeInteger(nearby.medical.nearest.distanceMeters)
+      ? nearby.medical.nearest : null;
+    evidence.medical_amenities = {
+      dimension: "medical_amenities", source: "amap", fetchedAt, status, quality,
+      observation: `3 公里内识别到 ${nearby.medical.hospitalCountWithin3000m} 家正规医院${nearest ? `，最近 ${String(nearest.name).trim()} 约 ${nearest.distanceMeters} 米（直线距离）` : ""}`,
+      hospitalCountWithin3000m: nearby.medical.hospitalCountWithin3000m,
+      ...(nearest ? { nearestName: String(nearest.name).trim(), nearestDistanceMeters: Number(nearest.distanceMeters) } : {}),
+      examples: nearby.medical.examples.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, 5),
     };
   }
   return { evidence, availability, fetchedAt };
@@ -255,10 +253,11 @@ function deduplicatedCommute(property: Property, preference: ResolvedCommutePref
 }
 function cachedNearby(entry: GeoEvidenceCacheEntry | null, locationSignature: string): PropertyGeoEvidence {
   if (!entry || entry.locationSignature !== locationSignature || !entry.nearbyEvidence) return {};
+  const currentNearbySemantics = entry.nearbySemanticsVersion === GEO_NEARBY_SEMANTICS_VERSION;
   return {
     ...(entry.nearbyEvidence.publicTransport ? { public_transport: entry.nearbyEvidence.publicTransport } : {}),
-    ...(entry.nearbyEvidence.commercialAmenities ? { commercial_amenities: entry.nearbyEvidence.commercialAmenities } : {}),
-    ...(entry.nearbyEvidence.dailyLifeAmenities ? { daily_life_amenities: entry.nearbyEvidence.dailyLifeAmenities } : {}),
+    ...(currentNearbySemantics && entry.nearbyEvidence.commercialAmenities ? { commercial_amenities: entry.nearbyEvidence.commercialAmenities } : {}),
+    ...(currentNearbySemantics && entry.nearbyEvidence.medicalAmenities ? { medical_amenities: entry.nearbyEvidence.medicalAmenities } : {}),
   };
 }
 
@@ -289,17 +288,19 @@ async function refreshPropertyGeoEvidence(property: Property, preferences: Buyer
   ]);
 
   const nextNearby = cachedNearby(expectedEntry, cached.locationSignature);
-  let nearbyFetchedAt = expectedEntry?.locationSignature === cached.locationSignature ? expectedEntry.nearbyFetchedAt : undefined;
+  let nearbyFetchedAt = expectedEntry?.locationSignature === cached.locationSignature && expectedEntry.nearbySemanticsVersion === GEO_NEARBY_SEMANTICS_VERSION ? expectedEntry.nearbyFetchedAt : undefined;
+  let nearbySemanticsVersion = expectedEntry?.nearbySemanticsVersion === GEO_NEARBY_SEMANTICS_VERSION
+    ? GEO_NEARBY_SEMANTICS_VERSION
+    : undefined;
   if (nearbyResult) {
     if (nearbyResult.availability.metro) {
       if (nearbyResult.evidence.public_transport) nextNearby.public_transport = nearbyResult.evidence.public_transport;
       else delete nextNearby.public_transport;
     }
     if (nearbyResult.availability.commercial && nearbyResult.evidence.commercial_amenities) nextNearby.commercial_amenities = nearbyResult.evidence.commercial_amenities;
-    const dailyComplete = nearbyResult.availability.supermarket && nearbyResult.availability.medical && nearbyResult.availability.park;
-    if (dailyComplete && nearbyResult.evidence.daily_life_amenities) nextNearby.daily_life_amenities = nearbyResult.evidence.daily_life_amenities;
-    else if (!nextNearby.daily_life_amenities && nearbyResult.evidence.daily_life_amenities) nextNearby.daily_life_amenities = nearbyResult.evidence.daily_life_amenities;
-    if (Object.values(nearbyResult.availability).every(Boolean)) nearbyFetchedAt = nearbyResult.fetchedAt;
+    if (nearbyResult.availability.medical && nearbyResult.evidence.medical_amenities) nextNearby.medical_amenities = nearbyResult.evidence.medical_amenities;
+    if (nearbyResult.availability.commercial || nearbyResult.availability.medical) nearbySemanticsVersion = GEO_NEARBY_SEMANTICS_VERSION;
+    if (nearbyResult.availability.metro && nearbyResult.availability.bus && nearbyResult.availability.commercial && nearbyResult.availability.medical) nearbyFetchedAt = nearbyResult.fetchedAt;
   }
 
   const primaryMatches = expectedEntry?.locationSignature === cached.locationSignature && expectedEntry?.primaryCommuteSignature === cached.primaryCommuteSignature;
@@ -322,6 +323,7 @@ async function refreshPropertyGeoEvidence(property: Property, preferences: Buyer
   const entry: GeoEvidenceCacheEntry = {
     version: GEO_EVIDENCE_SCHEMA_VERSION,
     qualityPolicyVersion: GEO_EVIDENCE_QUALITY_POLICY_VERSION,
+    ...(nearbySemanticsVersion ? { nearbySemanticsVersion } : {}),
     propertyId: property.id, locationSignature: cached.locationSignature,
     ...(cached.commuteSignature ? { commuteSignature: cached.commuteSignature } : {}),
     ...(legacyCommuteFetchedAt ? { commuteFetchedAt: legacyCommuteFetchedAt } : {}),
@@ -334,7 +336,7 @@ async function refreshPropertyGeoEvidence(property: Property, preferences: Buyer
     ...(Object.keys(nextNearby).length > 0 ? { nearbyEvidence: {
       ...(nextNearby.public_transport ? { publicTransport: nextNearby.public_transport } : {}),
       ...(nextNearby.commercial_amenities ? { commercialAmenities: nextNearby.commercial_amenities } : {}),
-      ...(nextNearby.daily_life_amenities ? { dailyLifeAmenities: nextNearby.daily_life_amenities } : {}),
+      ...(nextNearby.medical_amenities ? { medicalAmenities: nextNearby.medical_amenities } : {}),
     } } : {}),
     ...(primaryCommuteEvidence ? { primaryCommuteEvidence } : {}),
     ...(partnerCommuteEvidence ? { partnerCommuteEvidence } : {}),

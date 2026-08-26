@@ -4,7 +4,7 @@ export const GEO_EVIDENCE_DIMENSIONS = [
   "commute",
   "public_transport",
   "commercial_amenities",
-  "daily_life_amenities",
+  "medical_amenities",
 ] as const satisfies readonly DimensionKey[];
 
 export type GeoEvidenceDimension = (typeof GEO_EVIDENCE_DIMENSIONS)[number];
@@ -62,31 +62,31 @@ export interface PublicTransportGeoEvidence extends GeoEvidenceBase {
 
 export interface CommercialAmenitiesGeoEvidence extends GeoEvidenceBase {
   dimension: "commercial_amenities";
-  countWithin1000m: number;
-  hasMajorDestination: boolean;
+  countWithin2000m: number;
+  nearestDistanceMeters?: number;
+  nearestName?: string;
   examples: string[];
 }
 
-export interface DailyLifeAmenitiesGeoEvidence extends GeoEvidenceBase {
-  dimension: "daily_life_amenities";
-  supermarketCount: number;
-  medicalCount: number;
-  parkCount: number;
+export interface MedicalAmenitiesGeoEvidence extends GeoEvidenceBase {
+  dimension: "medical_amenities";
+  hospitalCountWithin3000m: number;
+  nearestDistanceMeters?: number;
+  nearestName?: string;
   examples: string[];
-  availableCategories: ("supermarket" | "medical" | "park")[];
 }
 
 export type GeoDimensionEvidence =
   | CommuteGeoEvidence
   | PublicTransportGeoEvidence
   | CommercialAmenitiesGeoEvidence
-  | DailyLifeAmenitiesGeoEvidence;
+  | MedicalAmenitiesGeoEvidence;
 
 export type PropertyGeoEvidence = Partial<{
   commute: CommuteGeoEvidence;
   public_transport: PublicTransportGeoEvidence;
   commercial_amenities: CommercialAmenitiesGeoEvidence;
-  daily_life_amenities: DailyLifeAmenitiesGeoEvidence;
+  medical_amenities: MedicalAmenitiesGeoEvidence;
 }>;
 
 export type GeoEvidenceByProperty = Record<string, PropertyGeoEvidence>;

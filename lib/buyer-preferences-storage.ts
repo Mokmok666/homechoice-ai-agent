@@ -59,6 +59,11 @@ function isConfirmedWorkLocation(value: unknown): value is ConfirmedWorkLocation
 function sanitizeOptionalLocations(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const sanitized = { ...(value as Record<string, unknown>) };
+  if (Array.isArray(sanitized.topPriorities)) {
+    sanitized.topPriorities = sanitized.topPriorities.map((priority) =>
+      priority === "daily_life_amenities" ? "medical_amenities" : priority,
+    );
+  }
   if (!(sanitized.primaryWorkLocationConfirmed === undefined || sanitized.primaryWorkLocationConfirmed === null || isConfirmedWorkLocation(sanitized.primaryWorkLocationConfirmed))) {
     delete sanitized.primaryWorkLocationConfirmed;
   }

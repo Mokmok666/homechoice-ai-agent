@@ -3,7 +3,7 @@ import type {
   CommuteGeoEvidence,
   CommutePersonEvidence,
   CommercialAmenitiesGeoEvidence,
-  DailyLifeAmenitiesGeoEvidence,
+  MedicalAmenitiesGeoEvidence,
   PropertyGeoEvidence,
   PublicTransportGeoEvidence,
 } from "@/types/geo-evidence";
@@ -18,18 +18,20 @@ import {
 export const GEO_EVIDENCE_STORAGE_KEY = "homechoice.geo-evidence.v1";
 export const GEO_EVIDENCE_SCHEMA_VERSION = 1 as const;
 export const GEO_EVIDENCE_QUALITY_POLICY_VERSION = 3 as const;
+export const GEO_NEARBY_SEMANTICS_VERSION = 2 as const;
 export const NEARBY_EVIDENCE_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 export const COMMUTE_EVIDENCE_TTL_MS = 24 * 60 * 60 * 1_000;
 
 interface NearbyEvidenceCache {
   publicTransport?: PublicTransportGeoEvidence;
   commercialAmenities?: CommercialAmenitiesGeoEvidence;
-  dailyLifeAmenities?: DailyLifeAmenitiesGeoEvidence;
+  medicalAmenities?: MedicalAmenitiesGeoEvidence;
 }
 
 export interface GeoEvidenceCacheEntry {
   version: typeof GEO_EVIDENCE_SCHEMA_VERSION;
   qualityPolicyVersion?: number;
+  nearbySemanticsVersion?: number;
   propertyId: string;
   locationSignature: string;
   commuteSignature?: string;
@@ -191,17 +193,16 @@ function isPublicTransportEvidence(value: unknown): value is PublicTransportGeoE
 }
 
 function isCommercialEvidence(value: unknown): value is CommercialAmenitiesGeoEvidence {
-  return isBaseEvidence(value, "commercial_amenities") && isNonNegativeInteger(value.countWithin1000m) &&
-    typeof value.hasMajorDestination === "boolean" && isStringArray(value.examples);
+  return isBaseEvidence(value, "commercial_amenities") && isNonNegativeInteger(value.countWithin2000m) &&
+    (value.nearestDistanceMeters === undefined || isNonNegativeInteger(value.nearestDistanceMeters)) &&
+    (value.nearestName === undefined || typeof value.nearestName === "string") && isStringArray(value.examples);
 }
 
-function isDailyLifeEvidence(value: unknown): value is DailyLifeAmenitiesGeoEvidence {
-  return isBaseEvidence(value, "daily_life_amenities") &&
-    isNonNegativeInteger(value.supermarketCount) && isNonNegativeInteger(value.medicalCount) &&
-    isNonNegativeInteger(value.parkCount) && isStringArray(value.examples) &&
-    Array.isArray(value.availableCategories) && value.availableCategories.every(
-      (item) => item === "supermarket" || item === "medical" || item === "park",
-    );
+function isMedicalEvidence(value: unknown): value is MedicalAmenitiesGeoEvidence {
+  return isBaseEvidence(value, "medical_amenities") &&
+    isNonNegativeInteger(value.hospitalCountWithin3000m) &&
+    (value.nearestDistanceMeters === undefined || isNonNegativeInteger(value.nearestDistanceMeters)) &&
+    (value.nearestName === undefined || typeof value.nearestName === "string") && isStringArray(value.examples);
 }
 
 function parseEntry(value: unknown): GeoEvidenceCacheEntry | null {
@@ -217,6 +218,7 @@ function parseEntry(value: unknown): GeoEvidenceCacheEntry | null {
   if (typeof value.qualityPolicyVersion === "number" && Number.isInteger(value.qualityPolicyVersion)) {
     entry.qualityPolicyVersion = value.qualityPolicyVersion;
   }
+  if (typeof value.nearbySemanticsVersion === "number" && Number.isInteger(value.nearbySemanticsVersion)) entry.nearbySemanticsVersion = value.nearbySemanticsVersion;
   if (typeof value.commuteSignature === "string" && value.commuteSignature) entry.commuteSignature = value.commuteSignature;
   if (isValidDate(value.nearbyFetchedAt)) entry.nearbyFetchedAt = value.nearbyFetchedAt;
   if (isValidDate(value.commuteFetchedAt)) entry.commuteFetchedAt = value.commuteFetchedAt;
@@ -224,7 +226,7 @@ function parseEntry(value: unknown): GeoEvidenceCacheEntry | null {
     const nearby: NearbyEvidenceCache = {};
     if (isPublicTransportEvidence(value.nearbyEvidence.publicTransport)) nearby.publicTransport = value.nearbyEvidence.publicTransport;
     if (isCommercialEvidence(value.nearbyEvidence.commercialAmenities)) nearby.commercialAmenities = value.nearbyEvidence.commercialAmenities;
-    if (isDailyLifeEvidence(value.nearbyEvidence.dailyLifeAmenities)) nearby.dailyLifeAmenities = value.nearbyEvidence.dailyLifeAmenities;
+    if (isMedicalEvidence(value.nearbyEvidence.medicalAmenities)) nearby.medicalAmenities = value.nearbyEvidence.medicalAmenities;
     if (Object.keys(nearby).length > 0) entry.nearbyEvidence = nearby;
   }
   if (isCommuteEvidence(value.commuteEvidence)) entry.commuteEvidence = value.commuteEvidence;
@@ -281,12 +283,13 @@ export function loadCachedPropertyGeoEvidence(
   const primaryMatches = locationMatches && primaryCommuteSignature !== undefined && storedEntry?.primaryCommuteSignature === primaryCommuteSignature;
   const partnerMatches = locationMatches && partnerCommuteSignature !== undefined && storedEntry?.partnerCommuteSignature === partnerCommuteSignature;
   const qualityPolicyMatches = storedEntry?.qualityPolicyVersion === GEO_EVIDENCE_QUALITY_POLICY_VERSION;
+  const nearbySemanticsMatches = storedEntry?.nearbySemanticsVersion === GEO_NEARBY_SEMANTICS_VERSION;
   const evidence: PropertyGeoEvidence = {};
 
   if (locationMatches && storedEntry?.nearbyEvidence) {
     if (storedEntry.nearbyEvidence.publicTransport) evidence.public_transport = storedEntry.nearbyEvidence.publicTransport;
-    if (storedEntry.nearbyEvidence.commercialAmenities) evidence.commercial_amenities = storedEntry.nearbyEvidence.commercialAmenities;
-    if (storedEntry.nearbyEvidence.dailyLifeAmenities) evidence.daily_life_amenities = storedEntry.nearbyEvidence.dailyLifeAmenities;
+    if (nearbySemanticsMatches && storedEntry.nearbyEvidence.commercialAmenities) evidence.commercial_amenities = storedEntry.nearbyEvidence.commercialAmenities;
+    if (nearbySemanticsMatches && storedEntry.nearbyEvidence.medicalAmenities) evidence.medical_amenities = storedEntry.nearbyEvidence.medicalAmenities;
   }
   const structuredCommute = buildCommuteGeoEvidence(
     preferences,
@@ -303,7 +306,7 @@ export function loadCachedPropertyGeoEvidence(
     commuteSignature,
     primaryCommuteSignature,
     partnerCommuteSignature,
-    nearbyStale: !locationMatches || !qualityPolicyMatches || isExpired(storedEntry?.nearbyFetchedAt, NEARBY_EVIDENCE_TTL_MS, nowMs),
+    nearbyStale: !locationMatches || !qualityPolicyMatches || !nearbySemanticsMatches || isExpired(storedEntry?.nearbyFetchedAt, NEARBY_EVIDENCE_TTL_MS, nowMs),
     commuteStale: Boolean(
       (primaryCommuteSignature && (!primaryMatches || !qualityPolicyMatches || isExpired(storedEntry?.primaryCommuteFetchedAt, COMMUTE_EVIDENCE_TTL_MS, nowMs))) ||
       (partnerCommuteSignature && (!partnerMatches || !qualityPolicyMatches || isExpired(storedEntry?.partnerCommuteFetchedAt, COMMUTE_EVIDENCE_TTL_MS, nowMs))),

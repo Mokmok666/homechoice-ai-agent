@@ -11,6 +11,12 @@ const ERROR_CODES = ["INVALID_REQUEST", "AI_NOT_CONFIGURED", "AI_TIMEOUT", "AI_P
 const FORBIDDEN_ANALYSIS_KEYS = new Set(["score", "matchscore", "overallscore", "ranking", "recommendation", "weight", "weights"]);
 const INTERNAL_PRODUCT_LANGUAGE = /Top1|Top2|Decision Engine|排名第一|综合评分模型|AI判断|决策引擎认为|根据模型|当前确定性排序/i;
 const INTERNAL_PENDING_LANGUAGE = /结构化事实|外部证据进行AI分析|未来结合.*AI分析/;
+const ABSOLUTE_NEGATIVE_LANGUAGE = /不足|较差|明显弱|缺乏|短板|表现差|配套弱|品质不好/;
+
+export interface AINarrativeConsistencyConstraint {
+  dimensions: Array<{ label: string; score: number | null; status: "known" | "partial" | "unknown" }>;
+  educationNeed: "none" | "current" | "future";
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function isNonEmptyString(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0; }
@@ -23,6 +29,31 @@ function hasForbiddenAnalysisKey(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasForbiddenAnalysisKey);
   if (!isRecord(value)) return false;
   return Object.entries(value).some(([key, child]) => FORBIDDEN_ANALYSIS_KEYS.has(key.toLowerCase()) || hasForbiddenAnalysisKey(child));
+}
+
+function normalizeCandidateName(value: string): string {
+  return value.normalize("NFKC").toLocaleLowerCase("zh-CN").replace(/[\p{P}\p{S}\s]/gu, "");
+}
+
+function isSameCandidateName(actual: string, expected: string): boolean {
+  return normalizeCandidateName(actual) === normalizeCandidateName(expected);
+}
+
+function referencesCandidateName(text: string, candidateName: string): boolean {
+  const normalizedText = normalizeCandidateName(text);
+  const normalizedName = normalizeCandidateName(candidateName);
+  if (!normalizedName) return false;
+  if (normalizedText.includes(normalizedName)) return true;
+
+  const explicitSegments = candidateName
+    .normalize("NFKC")
+    .split(/[\s·•・:：/／|｜—–()（）\[\]【】]+/u)
+    .map(normalizeCandidateName)
+    .filter((segment) => segment.length >= 4);
+  if (explicitSegments.some((segment) => normalizedText.includes(segment))) return true;
+
+  const coreSuffix = normalizedName.length > 4 ? normalizedName.slice(-4) : "";
+  return coreSuffix.length >= 4 && normalizedText.includes(coreSuffix);
 }
 
 function validatePreferences(value: unknown, errors: string[]): void {
@@ -109,24 +140,40 @@ function validateAnalysis(
   expectedTopPropertyName?: string,
   expectedAlternativeNames: string[] = [],
   requiresCommuteBoundaryNuance = false,
+  consistency?: AINarrativeConsistencyConstraint,
 ): void {
   if (!isRecord(analysis)) { errors.push("analysis must be an object"); return; }
   if (!hasOnlyKeys(analysis, ["topPropertyId", "topPropertyName", "decisionSummary", "pendingEvidence", "disclaimer"])) errors.push("analysis contains unexpected fields");
   if (hasForbiddenAnalysisKey(analysis)) errors.push("analysis must not contain scores, ranking, recommendation or weights");
   if (!isNonEmptyString(analysis.topPropertyId) || (expectedTopPropertyId && analysis.topPropertyId !== expectedTopPropertyId)) errors.push("analysis.topPropertyId must equal deterministic Top1");
-  if (!isNonEmptyString(analysis.topPropertyName) || (expectedTopPropertyName && analysis.topPropertyName !== expectedTopPropertyName)) errors.push("analysis.topPropertyName must equal deterministic Top1 name");
-  if (!isNonEmptyString(analysis.decisionSummary) || /[\r\n]/.test(analysis.decisionSummary)) {
-    errors.push("analysis.decisionSummary must be one paragraph");
+  if (!isNonEmptyString(analysis.topPropertyName) || (expectedTopPropertyName && !isSameCandidateName(analysis.topPropertyName, expectedTopPropertyName))) errors.push("analysis.topPropertyName must map to deterministic Top1 name");
+  if (!isNonEmptyString(analysis.decisionSummary)) {
+    errors.push("analysis.decisionSummary must be a non-empty string");
   } else {
     const decisionSummary = analysis.decisionSummary;
-    const sentenceCount = (decisionSummary.match(/[。！？]/g) ?? []).length;
-    if (sentenceCount < 3 || sentenceCount > 7) errors.push("analysis.decisionSummary sentence structure is unreasonable");
-    if (decisionSummary.length < 80 || decisionSummary.length > 650) errors.push("analysis.decisionSummary length is unreasonable");
     if (INTERNAL_PRODUCT_LANGUAGE.test(decisionSummary)) errors.push("analysis.decisionSummary contains internal product language");
-    if (expectedAlternativeNames.length > 0 && !expectedAlternativeNames.some((name) => decisionSummary.includes(name))) errors.push("analysis.decisionSummary must compare an authoritative alternative");
+    if (expectedAlternativeNames.length > 0 && !expectedAlternativeNames.some((name) => referencesCandidateName(decisionSummary, name))) errors.push("analysis.decisionSummary must reference the authoritative alternative");
     if (requiresCommuteBoundaryNuance && /均.{0,8}(?:理想时间|理想通勤|理想范围)|(?:都|均)在.{0,6}理想/.test(decisionSummary)) errors.push("analysis.decisionSummary misstates commute threshold");
+    if (consistency) {
+      const clauses = decisionSummary.split(/[。！？；\n]+/).map((item) => item.trim()).filter(Boolean);
+      for (const dimension of consistency.dimensions) {
+        const related = clauses.filter((clause) => clause.includes(dimension.label));
+        if (dimension.score !== null && dimension.score >= 80 && related.some((clause) => ABSOLUTE_NEGATIVE_LANGUAGE.test(clause))) {
+          errors.push(`analysis.decisionSummary contradicts high ${dimension.label} score`);
+        }
+        if ((dimension.score === null || dimension.status === "unknown") && related.some((clause) => /表现差|配套弱|品质不好|明显弱|较差|短板/.test(clause))) {
+          errors.push(`analysis.decisionSummary treats unknown ${dimension.label} as negative`);
+        }
+      }
+      if (consistency.educationNeed === "none") {
+        const educationClauses = clauses.filter((clause) => /教育|学校|学位|入学/.test(clause));
+        if (educationClauses.some((clause) => ABSOLUTE_NEGATIVE_LANGUAGE.test(clause)) || (Array.isArray(analysis.pendingEvidence) && analysis.pendingEvidence.some((item) => typeof item === "string" && /教育|学校|学位|入学/.test(item)))) {
+          errors.push("analysis must not treat education as a risk when educationNeed is none");
+        }
+      }
+    }
   }
-  if (!isStringArray(analysis.pendingEvidence) || analysis.pendingEvidence.length > 3 || analysis.pendingEvidence.some((item) => INTERNAL_PRODUCT_LANGUAGE.test(item) || INTERNAL_PENDING_LANGUAGE.test(item)) || !isNonEmptyString(analysis.disclaimer)) errors.push("analysis evidence or disclaimer is invalid");
+  if (!isStringArray(analysis.pendingEvidence) || analysis.pendingEvidence.length > 5 || analysis.pendingEvidence.some((item) => !isNonEmptyString(item) || INTERNAL_PRODUCT_LANGUAGE.test(item) || INTERNAL_PENDING_LANGUAGE.test(item)) || !isNonEmptyString(analysis.disclaimer)) errors.push("analysis evidence or disclaimer is invalid");
 }
 
 export function validateAIAnalysisResponse(
@@ -135,11 +182,12 @@ export function validateAIAnalysisResponse(
   expectedTopPropertyName?: string,
   expectedAlternativeNames: string[] = [],
   requiresCommuteBoundaryNuance = false,
+  consistency?: AINarrativeConsistencyConstraint,
 ): ValidationResult<AIAnalysisResponse> {
   const errors: string[] = [];
   if (!isRecord(value) || typeof value.ok !== "boolean") return { success: false, errors: ["response must contain boolean ok"] };
   if (value.ok) {
-    validateAnalysis(value.analysis, errors, expectedTopPropertyId, expectedTopPropertyName, expectedAlternativeNames, requiresCommuteBoundaryNuance);
+    validateAnalysis(value.analysis, errors, expectedTopPropertyId, expectedTopPropertyName, expectedAlternativeNames, requiresCommuteBoundaryNuance, consistency);
     const metadata = value.metadata;
     if (!isRecord(metadata) || !isNonEmptyString(metadata.generatedAt) || !isNonEmptyString(metadata.inputSignature) || metadata.provider !== "zhipu" || !isNonEmptyString(metadata.model)) errors.push("response metadata is invalid");
   } else {
