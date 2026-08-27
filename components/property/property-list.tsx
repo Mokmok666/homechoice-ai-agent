@@ -6,7 +6,8 @@ import { Building2, MapPin, Pencil, Plus, Trash2, TrainFront } from "lucide-reac
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useSupabaseAuth } from "@/components/providers/supabase-auth-provider";
-import { deletePersistedProperty, loadProperties, MAX_PROPERTIES } from "@/lib/property-storage";
+import { getEffectiveProperties, isDemoModeActive } from "@/lib/demo/demo-mode";
+import { deletePersistedProperty, MAX_PROPERTIES } from "@/lib/property-storage";
 import type { Property, PropertyStatus } from "@/types/property";
 
 const STATUS_LABELS: Record<PropertyStatus, string> = {
@@ -29,11 +30,13 @@ export function PropertyList() {
   const { authReady, userId, supabaseAvailable } = useSupabaseAuth();
   const [properties, setProperties] = useState<Property[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [demoActive, setDemoActive] = useState(false);
 
   useEffect(() => {
     if (!authReady) return;
     let active = true;
-    void loadProperties(userId).then((loaded) => {
+    setDemoActive(isDemoModeActive());
+    void getEffectiveProperties(userId).then((loaded) => {
       if (active) setProperties(loaded);
     }).finally(() => {
       if (active) setIsLoading(false);
@@ -42,6 +45,7 @@ export function PropertyList() {
   }, [authReady, userId]);
 
   async function handleDelete(property: Property) {
+    if (demoActive) return;
     if (!window.confirm(`确定删除“${property.name}”吗？`)) return;
     setProperties(await deletePersistedProperty(property.id, userId));
   }
@@ -61,9 +65,11 @@ export function PropertyList() {
       <div className="mt-7 flex flex-col gap-4 rounded-2xl border border-[#e5e3dd] bg-white/60 p-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm font-medium">已添加 {properties.length} / {MAX_PROPERTIES} 套候选房源</p>
-          <p className="mt-1 text-sm text-[#858782]">{supabaseAvailable ? "房源已保存到您的匿名云端空间，并在当前浏览器保留副本。" : "房源暂时保存在当前浏览器中。"}</p>
+          <p className="mt-1 text-sm text-[#858782]">{demoActive ? "示例房源仅用于演示，请退出示例体验后管理自己的候选房源。" : supabaseAvailable ? "房源已保存到您的匿名云端空间，并在当前浏览器保留副本。" : "房源暂时保存在当前浏览器中。"}</p>
         </div>
-        {properties.length < MAX_PROPERTIES ? (
+        {demoActive ? (
+          <Button type="button" disabled className="shrink-0 bg-[#ebeae5] text-[#858782] disabled:cursor-not-allowed">请先退出示例体验再添加房源</Button>
+        ) : properties.length < MAX_PROPERTIES ? (
           <Button asChild className="shrink-0 bg-white text-[#353833] ring-1 ring-[#dbdad5] hover:bg-[#f4f3ee]">
             <Link href="/properties/new"><Plus size={18} /> 添加房源</Link>
           </Button>
@@ -115,10 +121,10 @@ export function PropertyList() {
                   <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3 text-sm text-[#757873]">
                     <span>{property.floor}</span>
                     <span className="flex items-center gap-1.5"><TrainFront size={14} />{property.metroDistance === null ? "地铁距离可进一步确认" : `距地铁约 ${property.metroDistance} 米`}</span>
-                    <div className="ml-auto flex items-center gap-2">
+                    {!demoActive && <div className="ml-auto flex items-center gap-2">
                       <Link href={`/properties/new?id=${property.id}`} className="inline-flex size-9 items-center justify-center rounded-full border border-[#dfddd7] transition hover:bg-[#f2f1ec]" aria-label={`编辑 ${property.name}`}><Pencil size={15} /></Link>
                       <button type="button" onClick={() => handleDelete(property)} className="inline-flex size-9 items-center justify-center rounded-full border border-[#eadedb] text-[#9b5a50] transition hover:bg-[#fcf2f0]" aria-label={`删除 ${property.name}`}><Trash2 size={15} /></button>
-                    </div>
+                    </div>}
                   </div>
                 </div>
               </article>

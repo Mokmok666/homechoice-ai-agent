@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { RefreshCcw } from "lucide-react";
 import { DecisionResults } from "@/components/decision/decision-results";
+import { DemoBanner } from "@/components/demo/demo-banner";
 
 export default function ResultsPage() {
   return (
@@ -12,6 +13,7 @@ export default function ResultsPage() {
         </div>
         <Link href="/preferences" className="pill h-12 w-fit"><RefreshCcw size={16} />调整偏好并重算</Link>
       </div>
+      <DemoBanner page="results" />
       <DecisionResults />
     </main>
   );

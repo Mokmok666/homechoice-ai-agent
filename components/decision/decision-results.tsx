@@ -10,13 +10,14 @@ import { findAIAnalysisBySignature } from "@/lib/ai-analysis-storage";
 import { refreshGeoEvidenceForProperties } from "@/lib/amap/evidence-client";
 import { projectAIAnalysisContext } from "@/lib/ai/input";
 import { createAIInputSignature } from "@/lib/ai/signature";
-import { BUYER_PREFERENCES_STORAGE_KEY, loadPersistedBuyerPreferences } from "@/lib/buyer-preferences-storage";
+import { BUYER_PREFERENCES_STORAGE_KEY } from "@/lib/buyer-preferences-storage";
+import { DEMO_ACTIVE_STORAGE_KEY, DEMO_PREFERENCES_STORAGE_KEY, getEffectiveBuyerPreferences, getEffectiveProperties } from "@/lib/demo/demo-mode";
 import { runDecisionEngine } from "@/lib/decision/engine";
 import { generateDecisionReasons } from "@/lib/decision/reason-generator";
 import { buildDecisionRisks, buildDecisionSummary, buildQuickComparison } from "@/lib/decision-presentation";
 import { savePersistedDecisionHistory } from "@/lib/decision-history-storage";
 import { GEO_EVIDENCE_STORAGE_KEY, loadCachedGeoEvidenceForProperties } from "@/lib/geo-evidence-storage";
-import { loadProperties, PROPERTY_STORAGE_KEY } from "@/lib/property-storage";
+import { PROPERTY_STORAGE_KEY } from "@/lib/property-storage";
 import { RECOMMENDATION_BADGE_STYLES, RECOMMENDATION_LABELS } from "@/lib/recommendation-presentation";
 import { WEB_EVIDENCE_STORAGE_KEY, loadCachedWebEvidenceForProperties } from "@/lib/web-evidence-storage";
 import { refreshWebEvidenceForProperties } from "@/lib/web-evidence/client";
@@ -73,8 +74,8 @@ export function DecisionResults() {
     setSaveStatus("idle");
     setIsLoading(true);
     const [allProperties, preferencesResult] = await Promise.all([
-      loadProperties(userId),
-      loadPersistedBuyerPreferences(userId),
+      getEffectiveProperties(userId),
+      getEffectiveBuyerPreferences(userId),
     ]);
     const manualProperties = allProperties.filter((property) => property.source === "manual");
     if (preferencesResult.status !== "valid") {
@@ -195,7 +196,7 @@ export function DecisionResults() {
   useEffect(() => {
     void refresh();
     function handleStorage(event: StorageEvent) {
-      if (event.key === PROPERTY_STORAGE_KEY || event.key === BUYER_PREFERENCES_STORAGE_KEY || event.key === GEO_EVIDENCE_STORAGE_KEY || event.key === WEB_EVIDENCE_STORAGE_KEY) void refresh();
+      if (event.key === PROPERTY_STORAGE_KEY || event.key === BUYER_PREFERENCES_STORAGE_KEY || event.key === DEMO_ACTIVE_STORAGE_KEY || event.key === DEMO_PREFERENCES_STORAGE_KEY || event.key === GEO_EVIDENCE_STORAGE_KEY || event.key === WEB_EVIDENCE_STORAGE_KEY) void refresh();
     }
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);

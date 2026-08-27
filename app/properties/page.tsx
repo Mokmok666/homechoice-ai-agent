@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight, LockKeyhole } from "lucide-react";
 import { PropertyList } from "@/components/property/property-list";
 import { Button } from "@/components/ui/button";
+import { DemoBanner } from "@/components/demo/demo-banner";
 
 export default function PropertiesPage() {
   return (
@@ -10,6 +11,8 @@ export default function PropertiesPage() {
         <h1 className="display">我的房源</h1>
         <p className="sub">管理 3–5 套候选房源，统一记录位置、价格、户型和生活配套信息。</p>
       </div>
+
+      <DemoBanner page="properties" />
 
       <PropertyList />
 

@@ -1,4 +1,3 @@
-import { properties as mockProperties } from "@/lib/mock-data";
 import {
   FLOOR_LEVELS,
   ORIENTATIONS,
@@ -11,7 +10,11 @@ import {
   type PropertyInput,
   type PropertyStatus,
 } from "@/types/property";
-import { deleteCloudProperty, listCloudProperties, upsertCloudProperty } from "@/lib/supabase/property-repository";
+import {
+  deleteCloudProperty,
+  listCloudProperties,
+  upsertCloudProperty,
+} from "@/lib/supabase/property-repository";
 
 export const PROPERTY_STORAGE_KEY = "homechoice.properties.v1";
 export const MAX_PROPERTIES = 5;
@@ -211,36 +214,6 @@ function createId(): string {
   return `property-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function createMockSeed(): Property[] {
-  const timestamp = new Date().toISOString();
-
-  return mockProperties.map((property) => {
-    const layoutCounts = parseLayoutCounts(property.layout);
-    return ({
-    id: property.id,
-    name: property.name,
-    city: property.city,
-    district: property.district,
-    address: `${property.district} · ${property.name.split("·")[0]}`,
-    totalPrice: property.price.expected,
-    area: property.area,
-    layout: property.layout,
-    rooms: layoutCounts.rooms,
-    livingRooms: layoutCounts.livingRooms,
-    bathrooms: layoutCounts.bathrooms,
-    floor: property.floor,
-    metroDistance: Math.max(300, property.commute.transit * 20),
-    schoolInformation: `${property.education.school}（${property.education.status}）`,
-    propertyManagementInformation: `${property.management.company} · ${property.management.maintenance}`,
-    status: "pending_analysis",
-    imageUrl: property.image,
-    source: "mock",
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    });
-  });
-}
-
 function writeProperties(properties: Property[]): void {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(PROPERTY_STORAGE_KEY, JSON.stringify(properties));
@@ -259,11 +232,7 @@ export function getProperties(): Property[] {
   if (typeof window === "undefined") return [];
 
   const stored = window.localStorage.getItem(PROPERTY_STORAGE_KEY);
-  if (stored === null) {
-    const seed = createMockSeed();
-    writeProperties(seed);
-    return seed;
-  }
+  if (stored === null) return [];
 
   try {
     const parsed: unknown = JSON.parse(stored);

@@ -1,0 +1,180 @@
+import type { BuyerPreferences } from "@/types/buyer-preferences";
+import type { ConfirmedPropertyLocation, Property } from "@/types/property";
+
+export const DEMO_PROPERTY_IDS = [
+  "demo-pazhou",
+  "demo-wanbo",
+  "demo-science-city",
+] as const;
+
+export const DEMO_PREFERENCES_ID = "demo-buyer-preferences";
+export const DEMO_DATA_TIMESTAMP = "2026-08-27T00:00:00.000Z";
+
+function confirmedPropertyLocation(
+  name: string,
+  district: string,
+  formattedAddress: string,
+  lng: number,
+  lat: number,
+  confirmedAt: string,
+): ConfirmedPropertyLocation {
+  return {
+    name,
+    formattedAddress,
+    province: "广东省",
+    city: "广州市",
+    district,
+    lng,
+    lat,
+    source: "amap",
+    confirmedByUser: true,
+    confirmedAt,
+  };
+}
+
+function baseProperty(
+  id: (typeof DEMO_PROPERTY_IDS)[number],
+  name: string,
+  district: string,
+  address: string,
+  totalPrice: number,
+  listingPrice: number,
+  area: number,
+  rooms: number,
+  lng: number,
+  lat: number,
+  timestamp: string,
+): Property {
+  return {
+    id,
+    name,
+    city: "广州",
+    district,
+    address,
+    totalPrice,
+    listingPrice,
+    area,
+    layout: `${rooms}室2厅1卫`,
+    rooms,
+    livingRooms: 2,
+    bathrooms: 1,
+    customLayout: null,
+    floor: "中层",
+    floorLevel: "middle",
+    floorNumber: null,
+    totalFloors: null,
+    metroDistance: null,
+    schoolInformation: "",
+    propertyManagementInformation: "",
+    propertyCompany: null,
+    propertyFee: null,
+    propertyExperience: null,
+    environment: null,
+    noise: null,
+    parking: null,
+    publicArea: null,
+    actualCommuteExperience: null,
+    recentDealPrice: null,
+    comparableTransactions: [],
+    deliveryYear: null,
+    orientation: null,
+    customOrientation: null,
+    confirmedLocation: confirmedPropertyLocation(name, district, address, lng, lat, timestamp),
+    status: "pending_analysis",
+    source: "manual",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+export function createDemoProperties(timestamp = DEMO_DATA_TIMESTAMP): Property[] {
+  return [
+    baseProperty(
+      "demo-pazhou",
+      "琶洲·示例公馆",
+      "海珠区",
+      "广东省广州市海珠区琶洲区域（示例位置）",
+      288,
+      305,
+      105,
+      3,
+      113.3667,
+      23.0982,
+      timestamp,
+    ),
+    baseProperty(
+      "demo-wanbo",
+      "万博·示例华庭",
+      "番禺区",
+      "广东省广州市番禺区万博商务区（示例位置）",
+      258,
+      270,
+      128,
+      4,
+      113.3472,
+      23.0008,
+      timestamp,
+    ),
+    baseProperty(
+      "demo-science-city",
+      "科学城·示例府",
+      "黄埔区",
+      "广东省广州市黄埔区广州科学城（示例位置）",
+      228,
+      238,
+      112,
+      3,
+      113.4507,
+      23.1656,
+      timestamp,
+    ),
+  ];
+}
+
+export function createDemoBuyerPreferences(timestamp = DEMO_DATA_TIMESTAMP): BuyerPreferences {
+  return {
+    id: DEMO_PREFERENCES_ID,
+    purchasePurpose: "self_use_and_value",
+    maximumBudget: 300,
+    primaryWorkLocation: "广州珠江新城附近",
+    partnerWorkLocation: "广州琶洲附近",
+    primaryWorkLocationConfirmed: {
+      name: "珠江新城",
+      formattedAddress: "广东省广州市天河区珠江新城",
+      province: "广东省",
+      city: "广州市",
+      district: "天河区",
+      lng: 113.3213,
+      lat: 23.1197,
+      source: "amap",
+      confirmedByUser: true,
+      confirmedAt: timestamp,
+    },
+    partnerWorkLocationConfirmed: {
+      name: "琶洲",
+      formattedAddress: "广东省广州市海珠区琶洲",
+      province: "广东省",
+      city: "广州市",
+      district: "海珠区",
+      lng: 113.3667,
+      lat: 23.0982,
+      source: "amap",
+      confirmedByUser: true,
+      confirmedAt: timestamp,
+    },
+    primaryCommuteMode: "driving",
+    primaryIdealCommuteMinutes: 45,
+    primaryMaxCommuteMinutes: 60,
+    partnerCommuteMode: "driving",
+    partnerIdealCommuteMinutes: 45,
+    partnerMaxCommuteMinutes: 60,
+    commuteMode: "driving",
+    idealCommuteMinutes: 45,
+    maxCommuteMinutes: 60,
+    educationNeed: "none",
+    educationStages: [],
+    topPriorities: ["commute", "price", "layout_and_space"],
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}

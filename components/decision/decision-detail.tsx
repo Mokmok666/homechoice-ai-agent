@@ -6,11 +6,10 @@ import { AlertCircle, ArrowLeft, CheckCircle2, Clock3, Database, HelpCircle, Spa
 import { ScoreRing } from "@/components/decision/score-ring";
 import { useSupabaseAuth } from "@/components/providers/supabase-auth-provider";
 import { refreshGeoEvidenceForProperties } from "@/lib/amap/evidence-client";
-import { loadPersistedBuyerPreferences } from "@/lib/buyer-preferences-storage";
+import { getEffectiveBuyerPreferences, getEffectiveProperties } from "@/lib/demo/demo-mode";
 import { DIMENSION_LABELS, DIMENSION_TYPE_LABELS, DIMENSION_TYPES } from "@/lib/decision/dimensions";
 import { runDecisionEngine } from "@/lib/decision/engine";
 import { loadCachedGeoEvidenceForProperties } from "@/lib/geo-evidence-storage";
-import { loadProperties } from "@/lib/property-storage";
 import { RECOMMENDATION_BADGE_STYLES, RECOMMENDATION_LABELS } from "@/lib/recommendation-presentation";
 import { loadCachedWebEvidenceForProperties } from "@/lib/web-evidence-storage";
 import { refreshWebEvidenceForProperties } from "@/lib/web-evidence/client";
@@ -58,14 +57,14 @@ export function DecisionDetail({ propertyId }: { propertyId: string }) {
     const controller = new AbortController();
     async function initialize() {
     const [allProperties, preferences] = await Promise.all([
-      loadProperties(userId),
-      loadPersistedBuyerPreferences(userId),
+      getEffectiveProperties(userId),
+      getEffectiveBuyerPreferences(userId),
     ]);
     if (controller.signal.aborted) return;
     const properties = allProperties.filter((property) => property.source === "manual");
     const property = properties.find((item) => item.id === propertyId);
     if (!property) {
-      setMessage("该房源已被删除、不可用，或属于不参与真实分析的演示数据。");
+      setMessage("该房源已被删除或不可用。");
       return;
     }
     if (preferences.status !== "valid") {

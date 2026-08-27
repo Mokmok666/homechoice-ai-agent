@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { loadPersistedBuyerPreferences, savePersistedBuyerPreferences } from "@/lib/buyer-preferences-storage";
+import { savePersistedBuyerPreferences } from "@/lib/buyer-preferences-storage";
+import { getEffectiveBuyerPreferences, isDemoModeActive, saveDemoBuyerPreferences } from "@/lib/demo/demo-mode";
 import { useSupabaseAuth } from "@/components/providers/supabase-auth-provider";
 import { WorkLocationConfirmation } from "./work-location-confirmation";
 import {
@@ -156,11 +157,13 @@ export function BuyerPreferencesForm() {
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingPreferences, setIsLoadingPreferences] = useState(true);
+  const [demoActive, setDemoActive] = useState(false);
 
   useEffect(() => {
     if (!authReady) return;
     let active = true;
-    void loadPersistedBuyerPreferences(userId).then((result) => {
+    setDemoActive(isDemoModeActive());
+    void getEffectiveBuyerPreferences(userId).then((result) => {
     if (!active) return;
     if (result.status === "invalid") {
       setStorageWarning(result.message);
@@ -264,7 +267,8 @@ export function BuyerPreferencesForm() {
 
     setIsSubmitting(true);
     try {
-      await savePersistedBuyerPreferences(input, existingPreferences, userId);
+      if (demoActive) saveDemoBuyerPreferences(input, existingPreferences);
+      else await savePersistedBuyerPreferences(input, existingPreferences, userId);
       router.push("/results");
     } catch {
       setErrors({ form: "偏好保存失败，请确认浏览器允许本地存储后重试。" });
@@ -351,7 +355,7 @@ export function BuyerPreferencesForm() {
 
       <div className="mt-7 flex flex-col items-center">
         <Button type="submit" disabled={isSubmitting} className="h-14 w-full max-w-md text-base disabled:cursor-not-allowed disabled:opacity-60">{isSubmitting ? "正在保存…" : "保存偏好并查看分析"}<ArrowRight size={18} /></Button>
-        <div className="mt-3 flex items-center gap-2 text-[13px] text-[#8a8c87]"><LockKeyhole size={13} />{supabaseAvailable ? "偏好已保存到您的匿名云端空间" : "偏好暂时保存在当前浏览器"}</div>
+        <div className="mt-3 flex items-center gap-2 text-[13px] text-[#8a8c87]"><LockKeyhole size={13} />{demoActive ? "示例偏好仅保存在当前浏览器，退出示例体验后会清除" : supabaseAvailable ? "偏好已保存到您的匿名云端空间" : "偏好暂时保存在当前浏览器"}</div>
       </div>
     </form>
   );

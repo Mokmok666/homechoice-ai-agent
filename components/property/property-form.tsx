@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { LocationConfirmation } from "@/components/property/location-confirmation";
+import { isDemoModeActive } from "@/lib/demo/demo-mode";
 import { createPersistedProperty, loadProperty, updatePersistedProperty } from "@/lib/property-storage";
 import { useSupabaseAuth } from "@/components/providers/supabase-auth-provider";
 import type { ComparableTransaction, ConfirmedPropertyLocation, FloorLevel, Orientation, PropertyInput } from "@/types/property";
@@ -249,10 +250,16 @@ export function PropertyForm() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingProperty, setIsLoadingProperty] = useState(true);
+  const [demoActive, setDemoActive] = useState(false);
   const [confirmedLocation, setConfirmedLocation] = useState<ConfirmedPropertyLocation | null>(null);
 
   useEffect(() => {
     if (!authReady) return;
+    if (isDemoModeActive()) {
+      setDemoActive(true);
+      setIsLoadingProperty(false);
+      return;
+    }
     let active = true;
     const id = new URLSearchParams(window.location.search).get("id");
     if (!id) {
@@ -435,6 +442,16 @@ export function PropertyForm() {
   }
 
   if (isLoadingProperty) return <div className="card mt-7 h-64 animate-pulse" aria-label="正在读取您的房源" />;
+
+  if (demoActive) {
+    return (
+      <Card className="mt-7 p-7 text-center">
+        <h2 className="text-xl font-semibold">示例体验中暂不管理真实房源</h2>
+        <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-[#777a75]">示例房源仅用于演示。请先退出示例体验，再添加或编辑自己的候选房源。</p>
+        <Button asChild className="mt-6"><Link href="/properties"><ArrowLeft size={17} />返回示例房源</Link></Button>
+      </Card>
+    );
+  }
 
   return (
     <form onSubmit={handleSubmit} noValidate className="mt-7 space-y-6">
