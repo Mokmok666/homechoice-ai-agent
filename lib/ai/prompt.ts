@@ -28,7 +28,8 @@ export const AI_ANALYSIS_SYSTEM_PROMPT = `你是 HomeChoice 的购房决策解�
 21. 只返回约定JSON，不包含Markdown。
 22. 商业配套只指输入中两公里内的大型商场、购物中心或商业综合体证据，不得用超市、便利店、餐饮或其他生活POI证明商业优势。医疗配套只指三公里内正规医院的可达性；不得把药店、诊所、牙科、医美或保健机构写成医院，也不得猜测医院等级。
 23. 维度语义必须与确定性结果一致：score >= 80 的维度不得描述为“不足”“较差”“明显弱”“缺乏”或“短板”；若主要备选更高，只能写其在该维度“略有优势”或“相对更强”。score 为 null 或 status 为 unknown 时，只能写“尚无法判断”“证据不足”或“仍需确认”，不得描述为表现差。
-24. 当 educationNeed 为 none 时，教育不参与本次优劣、风险或候选比较；如确需提及，只能说明“当前家庭暂无教育需求，因此该项不作为本次决策重点”。风险优先来自 partial/unknown、低证据可信度、missingInputs 或具有合法低分的维度，不得把高分相对差异夸大为绝对短板。`;
+24. 当 educationNeed 为 none 时，教育不参与本次优劣、风险、候选比较或下一步行动；此时直接省略教育，不要把教育写成“尚无法判断”“需要核实”或其他待确认事项。风险优先来自 partial/unknown、低证据可信度、missingInputs 或具有合法低分的维度，不得把高分相对差异夸大为绝对短板。
+25. candidateComparisons 是程序根据候选事实生成的确定性比较结论，必须作为唯一相对关系依据。不得因为首选排在前面就推断它在每个维度都更好：TOP1_BETTER 才允许描述首选在该项相对更强；TOP1_WORSE 必须承认主要备选在该项更强；TOP1_WORSE_BUT_WITHIN_TARGET 必须承认主要备选通勤更短，只能说明首选仍满足目标，禁止称首选通勤更优、更便利、更匹配、具有优势或与备选相当；EQUAL 只能写基本相当、当前评分一致或差异有限，禁止称任一方更强、更弱或略逊；CLOSE 只能描述差异有限；UNKNOWN 不得作确定性优劣判断。通勤以 candidateComparisons.commute 为准，商业配套和医疗配套以 candidateComparisons.dimensions 中对应维度为准。若 commute.top1TargetStatus 为 WITHIN_IDEAL，必须写首选处于理想范围，禁止写高于或超过理想值；若为 WITHIN_MAX，才可写高于理想值但仍在最大可接受范围。`;
 
 const AI_ANALYSIS_OUTPUT_CONTRACT = `只返回以下JSON对象，不增加其他字段：
 {
@@ -41,12 +42,48 @@ const AI_ANALYSIS_OUTPUT_CONTRACT = `只返回以下JSON对象，不增加其他
 
 decisionSummary必须恰好包含4个非空自然段，不得包含项目符号、编号或小标题。存在多个候选时必须点名candidates[1]对应的主要备选房源，但不要使用“第二名”等系统化称呼。若某类证据不存在，明确写“目前证据不足”，不得补造数值或事实。`;
 
+function deterministicComparisonDirectives(request: AIAnalysisRequest): string[] {
+  const comparisons = request.context.candidateComparisons;
+  if (!comparisons) return ["当前只有一套候选，不生成候选相对优劣。"];
+  const directives: string[] = [];
+  if (comparisons.commute.relation === "TOP1_WORSE_BUT_WITHIN_TARGET") {
+    directives.push(`通勤确定性事实：首选本人${comparisons.commute.top1PrimaryMinutes ?? "未知"}分钟、伴侣${comparisons.commute.top1PartnerMinutes ?? "未知"}分钟；${comparisons.primaryAlternativeName ?? "主要备选"}本人${comparisons.commute.top2PrimaryMinutes ?? "未知"}分钟、伴侣${comparisons.commute.top2PartnerMinutes ?? "未知"}分钟。主要备选更短；首选仍满足当前目标。正文必须承认前者更短，禁止称首选通勤更优、相当或具有优势。`);
+  } else if (comparisons.commute.relation === "TOP1_WORSE") {
+    directives.push(`通勤：${comparisons.primaryAlternativeName ?? "主要备选"}的确定性通勤表现更好，禁止反向描述。`);
+  } else if (comparisons.commute.relation === "EQUAL" || comparisons.commute.relation === "CLOSE") {
+    directives.push("通勤：双方相同或接近，只能描述为相当或差异有限。");
+  }
+  if (comparisons.commute.top1TargetStatus === "WITHIN_IDEAL") {
+    directives.push("首选本人及伴侣通勤均在各自理想范围内，禁止写成高于理想值。");
+  }
+  for (const key of ["commercial_amenities", "medical_amenities"] as const) {
+    const fact = comparisons.dimensions.find((item) => item.dimensionKey === key);
+    if (fact?.relation === "EQUAL") directives.push(`${fact.label}：双方当前评分一致，禁止描述任一方更强、更弱或略逊。`);
+  }
+  for (const key of ["space_match", "layout_design"] as const) {
+    const fact = comparisons.dimensions.find((item) => item.dimensionKey === key);
+    if (fact?.relation === "TOP1_BETTER") directives.push(`${fact.label}：首选的确定性结果高于主要备选，禁止反称主要备选在该项更有优势。`);
+    if (fact?.relation === "TOP1_WORSE") directives.push(`${fact.label}：主要备选的确定性结果高于首选，禁止反称首选在该项更有优势。`);
+  }
+  if (comparisons.budgetMatch.relation === "TOP1_BETTER") {
+    directives.push(`预算：首选预期成交价${comparisons.budgetMatch.top1ExpectedTransactionPrice}万元，主要备选${comparisons.budgetMatch.top2ExpectedTransactionPrice}万元；首选资金余量更大，禁止写成双方预算表现相当。此处只说明预算匹配，不代表成交价合理。`);
+  } else if (comparisons.budgetMatch.relation === "EQUAL" || comparisons.budgetMatch.relation === "CLOSE") {
+    directives.push("预算：双方预期成交价及预算余量相同或接近，不得制造明显预算优势。");
+  }
+  if (request.context.preferences.educationNeed === "none") directives.push("教育：当前无教育需求，decisionSummary 与 pendingEvidence 中禁止出现教育、学校、学位或入学相关内容。");
+  return directives;
+}
+
 export function createAIAnalysisUserPrompt(request: AIAnalysisRequest): string {
   return [
     `语言：${request.locale}`,
     `输入签名：${request.inputSignature}`,
     "以下是经过白名单投影的完整决策上下文。候选顺序与首选房源不可更改：",
     JSON.stringify(request.context),
+    "以下确定性候选比较事实必须作为相对优劣的 ground truth，不得自行反转或从排名推断其他优势：",
+    JSON.stringify(request.context.candidateComparisons),
+    "最终强制检查（输出前逐条执行）：",
+    deterministicComparisonDirectives(request).join("\n"),
   ].join("\n\n");
 }
 

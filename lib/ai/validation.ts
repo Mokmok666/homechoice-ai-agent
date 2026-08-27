@@ -1,4 +1,10 @@
-import { AI_ANALYSIS_SCHEMA_VERSION, type AIAnalysisRequest, type AIAnalysisResponse } from "../../types/ai-analysis";
+import {
+  AI_ANALYSIS_SCHEMA_VERSION,
+  type AIAnalysisRequest,
+  type AIAnalysisResponse,
+  type AICandidateComparisonFacts,
+  type AIComparisonRelation,
+} from "../../types/ai-analysis";
 import { DECISION_PRIORITIES, EDUCATION_NEEDS, EDUCATION_STAGES, PURCHASE_PURPOSES, SELECTABLE_COMMUTE_MODES } from "../../types/buyer-preferences";
 import { DIMENSION_KEYS } from "../../types/decision";
 import { WEB_EVIDENCE_TARGET_DIMENSIONS } from "../web-evidence/types";
@@ -12,10 +18,19 @@ const FORBIDDEN_ANALYSIS_KEYS = new Set(["score", "matchscore", "overallscore", 
 const INTERNAL_PRODUCT_LANGUAGE = /Top1|Top2|Decision Engine|排名第一|综合评分模型|AI判断|决策引擎认为|根据模型|当前确定性排序/i;
 const INTERNAL_PENDING_LANGUAGE = /结构化事实|外部证据进行AI分析|未来结合.*AI分析/;
 const ABSOLUTE_NEGATIVE_LANGUAGE = /不足|较差|明显弱|缺乏|短板|表现差|配套弱|品质不好/;
+const COMPARISON_RELATIONS = ["TOP1_BETTER", "TOP1_WORSE", "TOP1_WORSE_BUT_WITHIN_TARGET", "EQUAL", "CLOSE", "UNKNOWN"] as const;
+const SCORE_COMPARISON_RELATIONS = ["TOP1_BETTER", "TOP1_WORSE", "EQUAL", "CLOSE", "UNKNOWN"] as const;
+const COMMUTE_LANGUAGE = /通勤|路程|上下班/;
+const COMMUTE_ADVANTAGE_LANGUAGE = /更短|更快|更便利|更匹配|更优|优势|领先|优于/;
+const NEGATED_ADVANTAGE_LANGUAGE = /没有.{0,8}优势|并无.{0,8}优势|不具备.{0,8}优势|不能.{0,8}(?:称为|视为).{0,8}优势|不应.{0,8}(?:称为|视为).{0,8}优势/;
+const RELATIVE_INEQUALITY_LANGUAGE = /略逊|逊于|不如|优于|领先于|更强|更弱|更好|更差|更便利|优势更明显|明显优势/;
+const CANDIDATE_ADVANTAGE_LANGUAGE = /更佳|更优|更强|更好|更便利|更匹配|略胜|略有优势|具有优势|优势明显|领先|优于|得分更高/;
 
 export interface AINarrativeConsistencyConstraint {
   dimensions: Array<{ label: string; score: number | null; status: "known" | "partial" | "unknown" }>;
   educationNeed: "none" | "current" | "future";
+  comparisons?: AICandidateComparisonFacts | null;
+  topPropertyName?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
@@ -54,6 +69,92 @@ function referencesCandidateName(text: string, candidateName: string): boolean {
 
   const coreSuffix = normalizedName.length > 4 ? normalizedName.slice(-4) : "";
   return coreSuffix.length >= 4 && normalizedText.includes(coreSuffix);
+}
+
+function dimensionLanguage(dimensionKey: string, label: string): RegExp {
+  if (dimensionKey === "commute") return COMMUTE_LANGUAGE;
+  if (dimensionKey === "commercial_amenities") return /商业配套|商业体|商场|购物中心|商业综合体/;
+  if (dimensionKey === "medical_amenities") return /医疗配套|正规医院|医院可达性/;
+  return new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+}
+
+function hasTop1CommuteAdvantageClaim(text: string, topPropertyName: string): boolean {
+  return text
+    .split(/[。！？；\n，,]+/)
+    .map((item) => item.trim())
+    .filter((item) => COMMUTE_LANGUAGE.test(item) && referencesCandidateName(item, topPropertyName))
+    .some((item) => COMMUTE_ADVANTAGE_LANGUAGE.test(item) && !NEGATED_ADVANTAGE_LANGUAGE.test(item));
+}
+
+function hasCandidateDimensionAdvantageClaim(text: string, candidateName: string, language: RegExp): boolean {
+  return text
+    .split(/[。！？；\n，,]+/)
+    .map((item) => item.trim())
+    .filter((item) => language.test(item) && referencesCandidateName(item, candidateName))
+    .some((item) => CANDIDATE_ADVANTAGE_LANGUAGE.test(item) && !NEGATED_ADVANTAGE_LANGUAGE.test(item));
+}
+
+function validateRelativeComparisonConsistency(
+  decisionSummary: string,
+  comparisons: AICandidateComparisonFacts,
+  topPropertyName: string,
+  errors: string[],
+): void {
+  const candidateNames = [topPropertyName, comparisons.primaryAlternativeName].filter((name): name is string => Boolean(name));
+  if (
+    (comparisons.commute.relation === "TOP1_WORSE" || comparisons.commute.relation === "TOP1_WORSE_BUT_WITHIN_TARGET")
+    && hasTop1CommuteAdvantageClaim(decisionSummary, topPropertyName)
+  ) {
+    errors.push("analysis.decisionSummary reverses deterministic commute comparison");
+  }
+
+  const clauses = decisionSummary.split(/[。！？；\n]+/).map((item) => item.trim()).filter(Boolean);
+  const commuteClauses = clauses.filter((clause) => COMMUTE_LANGUAGE.test(clause));
+  if (
+    (comparisons.commute.relation === "TOP1_WORSE" || comparisons.commute.relation === "TOP1_WORSE_BUT_WITHIN_TARGET")
+    && commuteClauses.some((clause) => /相当|基本一致|接近|差异有限/.test(clause) && candidateNames.every((name) => referencesCandidateName(clause, name)))
+  ) {
+    errors.push("analysis.decisionSummary treats a worse commute as equal");
+  }
+  if (
+    comparisons.commute.top1TargetStatus === "WITHIN_IDEAL"
+    && commuteClauses.some((clause) => /(?:高于|超过|超出|略高于).{0,8}理想/.test(clause))
+  ) {
+    errors.push("analysis.decisionSummary contradicts commute ideal threshold");
+  }
+  if (
+    comparisons.budgetMatch.relation !== "EQUAL"
+    && comparisons.budgetMatch.relation !== "CLOSE"
+    && clauses.some((clause) => /预算|预期成交价|资金余量/.test(clause) && /表现相当|基本相当|差异有限|基本一致/.test(clause))
+  ) {
+    errors.push("analysis.decisionSummary treats a material budget difference as equal");
+  }
+  for (const dimension of comparisons.dimensions) {
+    const language = dimensionLanguage(dimension.dimensionKey, dimension.label);
+    if (
+      dimension.relation === "TOP1_BETTER"
+      && comparisons.primaryAlternativeName
+      && hasCandidateDimensionAdvantageClaim(decisionSummary, comparisons.primaryAlternativeName, language)
+    ) {
+      errors.push(`analysis.decisionSummary reverses deterministic ${dimension.label} comparison`);
+      continue;
+    }
+    if (
+      dimension.relation === "TOP1_WORSE"
+      && hasCandidateDimensionAdvantageClaim(decisionSummary, topPropertyName, language)
+    ) {
+      errors.push(`analysis.decisionSummary reverses deterministic ${dimension.label} comparison`);
+      continue;
+    }
+    if (dimension.relation !== "EQUAL" && dimension.relation !== "UNKNOWN") continue;
+    const contradictory = clauses.some((clause) =>
+      language.test(clause)
+      && candidateNames.some((name) => referencesCandidateName(clause, name))
+      && RELATIVE_INEQUALITY_LANGUAGE.test(clause));
+    if (contradictory) {
+      errors.push(`analysis.decisionSummary makes unsupported ${dimension.relation.toLowerCase()} ${dimension.label} comparison`);
+    }
+  }
 }
 
 function validatePreferences(value: unknown, errors: string[]): void {
@@ -107,6 +208,89 @@ function validateCandidate(value: unknown, index: number, errors: string[]): voi
   }
 }
 
+function expectedScoreRelation(top1Score: number | null, top2Score: number | null): Exclude<AIComparisonRelation, "TOP1_WORSE_BUT_WITHIN_TARGET"> {
+  if (top1Score === null || top2Score === null) return "UNKNOWN";
+  const difference = top1Score - top2Score;
+  if (difference === 0) return "EQUAL";
+  if (Math.abs(difference) < 5) return "CLOSE";
+  return difference > 0 ? "TOP1_BETTER" : "TOP1_WORSE";
+}
+
+function validateCandidateComparisons(value: unknown, candidates: unknown[], errors: string[]): void {
+  if (candidates.length < 2) {
+    if (value !== null) errors.push("candidateComparisons must be null for a single candidate");
+    return;
+  }
+  const top1Candidate = isRecord(candidates[0]) ? candidates[0] : null;
+  const top1 = top1Candidate && isRecord(top1Candidate.decision) ? top1Candidate.decision : null;
+  const top1Property = top1Candidate && isRecord(top1Candidate.property) ? top1Candidate.property : null;
+  const top2Candidate = isRecord(candidates[1]) ? candidates[1] : null;
+  const top2 = top2Candidate && isRecord(top2Candidate.decision) ? top2Candidate.decision : null;
+  const top2Property = top2Candidate && isRecord(top2Candidate.property) ? top2Candidate.property : null;
+  if (!isRecord(value) || !top1 || !top2 || !top1Property || !top2Property) {
+    errors.push("candidateComparisons is invalid");
+    return;
+  }
+  if (
+    value.primaryAlternativeId !== top2Property.propertyId
+    || !(value.primaryAlternativeName === null || typeof value.primaryAlternativeName === "string")
+    || (typeof top2Property.name === "string" && typeof value.primaryAlternativeName === "string" && !isSameCandidateName(value.primaryAlternativeName, top2Property.name))
+  ) {
+    errors.push("candidateComparisons alternative must equal candidates[1]");
+  }
+
+  if (!Array.isArray(value.dimensions) || value.dimensions.length !== DIMENSION_KEYS.length) {
+    errors.push("candidateComparisons.dimensions must contain all 15 dimensions");
+  } else {
+    const top1Dimensions = new Map(
+      Array.isArray(top1.dimensions)
+        ? top1.dimensions.flatMap((dimension) => isRecord(dimension) && isOneOf(dimension.key, DIMENSION_KEYS) ? [[dimension.key, dimension] as const] : [])
+        : [],
+    );
+    const top2Dimensions = new Map(
+      Array.isArray(top2.dimensions)
+        ? top2.dimensions.flatMap((dimension) => isRecord(dimension) && isOneOf(dimension.key, DIMENSION_KEYS) ? [[dimension.key, dimension] as const] : [])
+        : [],
+    );
+    value.dimensions.forEach((dimension, index) => {
+      if (!isRecord(dimension) || !isOneOf(dimension.dimensionKey, DIMENSION_KEYS) || !isNonEmptyString(dimension.label) || !isOneOf(dimension.relation, SCORE_COMPARISON_RELATIONS) || !isNullableNumber(dimension.top1Score) || !isNullableNumber(dimension.top2Score)) {
+        errors.push(`candidateComparisons.dimensions[${index}] is invalid`);
+        return;
+      }
+      const expectedTop1 = top1Dimensions.get(dimension.dimensionKey)?.score;
+      const expectedTop2 = top2Dimensions.get(dimension.dimensionKey)?.score;
+      const expectedRelation = dimension.dimensionKey === "budget_match"
+        && isFiniteNumber(top1Property.expectedTransactionPrice)
+        && isFiniteNumber(top2Property.expectedTransactionPrice)
+        ? top1Property.expectedTransactionPrice === top2Property.expectedTransactionPrice
+          ? "EQUAL"
+          : Math.abs(top1Property.expectedTransactionPrice - top2Property.expectedTransactionPrice) <= 1
+            ? "CLOSE"
+            : top1Property.expectedTransactionPrice < top2Property.expectedTransactionPrice ? "TOP1_BETTER" : "TOP1_WORSE"
+        : expectedScoreRelation(dimension.top1Score as number | null, dimension.top2Score as number | null);
+      if (dimension.top1Score !== expectedTop1 || dimension.top2Score !== expectedTop2 || dimension.relation !== expectedRelation) {
+        errors.push(`candidateComparisons.dimensions[${index}] contradicts candidate scores`);
+      }
+    });
+  }
+
+  const commute = value.commute;
+  if (!isRecord(commute) || !isOneOf(commute.relation, COMPARISON_RELATIONS) || !["WITHIN_IDEAL", "WITHIN_MAX", "OUTSIDE_MAX", "UNKNOWN"].includes(String(commute.top1TargetStatus)) || !["top1PrimaryMinutes", "top1PartnerMinutes", "top2PrimaryMinutes", "top2PartnerMinutes", "primaryIdealMinutes", "primaryMaxMinutes", "partnerIdealMinutes", "partnerMaxMinutes"].every((key) => isNullableNumber(commute[key]))) {
+    errors.push("candidateComparisons.commute is invalid");
+  }
+  const budget = value.budgetMatch;
+  if (!isRecord(budget) || !isOneOf(budget.relation, SCORE_COMPARISON_RELATIONS) || !["maximumBudget", "top1ExpectedTransactionPrice", "top2ExpectedTransactionPrice", "top1BudgetMargin", "top2BudgetMargin"].every((key) => isFiniteNumber(budget[key]))) {
+    errors.push("candidateComparisons.budgetMatch is invalid");
+  } else if (
+    budget.top1ExpectedTransactionPrice !== top1Property.expectedTransactionPrice
+    || budget.top2ExpectedTransactionPrice !== top2Property.expectedTransactionPrice
+    || budget.top1BudgetMargin !== (budget.maximumBudget as number) - (budget.top1ExpectedTransactionPrice as number)
+    || budget.top2BudgetMargin !== (budget.maximumBudget as number) - (budget.top2ExpectedTransactionPrice as number)
+  ) {
+    errors.push("candidateComparisons.budgetMatch contradicts candidate prices");
+  }
+}
+
 function validateContext(value: unknown, errors: string[]): void {
   if (!isRecord(value)) { errors.push("context must be an object"); return; }
   if (!isNonEmptyString(value.asOfDate) || !/^\d{4}-\d{2}-\d{2}$/.test(value.asOfDate)) errors.push("asOfDate is invalid");
@@ -120,6 +304,7 @@ function validateContext(value: unknown, errors: string[]): void {
     value.candidates.forEach((candidate, index) => validateCandidate(candidate, index, errors));
     const candidateIds = value.candidates.map((candidate) => isRecord(candidate) && isRecord(candidate.property) ? candidate.property.propertyId : null);
     if (!ranking?.every((id, index) => candidateIds[index] === id)) errors.push("candidate order must equal deterministic ranking");
+    validateCandidateComparisons(value.candidateComparisons, value.candidates, errors);
   }
 }
 
@@ -167,9 +352,17 @@ function validateAnalysis(
       }
       if (consistency.educationNeed === "none") {
         const educationClauses = clauses.filter((clause) => /教育|学校|学位|入学/.test(clause));
-        if (educationClauses.some((clause) => ABSOLUTE_NEGATIVE_LANGUAGE.test(clause)) || (Array.isArray(analysis.pendingEvidence) && analysis.pendingEvidence.some((item) => typeof item === "string" && /教育|学校|学位|入学/.test(item)))) {
-          errors.push("analysis must not treat education as a risk when educationNeed is none");
+        if (educationClauses.length > 0 || (Array.isArray(analysis.pendingEvidence) && analysis.pendingEvidence.some((item) => typeof item === "string" && /教育|学校|学位|入学/.test(item)))) {
+          errors.push("analysis must omit education when educationNeed is none");
         }
+      }
+      if (consistency.comparisons && consistency.topPropertyName) {
+        validateRelativeComparisonConsistency(
+          decisionSummary,
+          consistency.comparisons,
+          consistency.topPropertyName,
+          errors,
+        );
       }
     }
   }

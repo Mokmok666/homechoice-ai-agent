@@ -1,10 +1,15 @@
 import { createDecisionPropertyView, validateTextField } from "../decision/dataQuality";
 import { DIMENSION_LABELS } from "../decision/dimensions";
+import { FAMILY_COMMUTE_WEIGHTS } from "../commute-evidence";
 import { resolvePartnerCommutePreference, resolvePrimaryCommutePreference } from "../../types/buyer-preferences";
 import type {
   AIAnalysisContext,
+  AIBudgetComparisonFact,
   AIBuyerPreferencesContext,
+  AICandidateComparisonFacts,
   AICandidateDecisionContext,
+  AICommuteComparisonFact,
+  AIComparisonRelation,
   AICommutePersonContext,
   AIDecisionContext,
   AIGeoEvidenceContext,
@@ -210,6 +215,122 @@ function projectWebEvidence(evidence: WebEvidenceByProperty[string] | undefined)
   return { fetchedAt: evidence.fetchedAt, dimensions };
 }
 
+function scoreRelation(top1Score: number | null, top2Score: number | null): Exclude<AIComparisonRelation, "TOP1_WORSE_BUT_WITHIN_TARGET"> {
+  if (top1Score === null || top2Score === null) return "UNKNOWN";
+  const difference = top1Score - top2Score;
+  if (difference === 0) return "EQUAL";
+  if (Math.abs(difference) < 5) return "CLOSE";
+  return difference > 0 ? "TOP1_BETTER" : "TOP1_WORSE";
+}
+
+function commuteTargetStatus(
+  primaryMinutes: number | null,
+  partnerMinutes: number | null,
+  primaryPreference: ResolvedCommutePreference,
+  partnerPreference: ResolvedCommutePreference | null,
+): AICommuteComparisonFact["top1TargetStatus"] {
+  if (primaryMinutes === null || primaryPreference.idealMinutes === null || primaryPreference.maxMinutes === null) return "UNKNOWN";
+  if (partnerPreference && (partnerMinutes === null || partnerPreference.idealMinutes === null || partnerPreference.maxMinutes === null)) return "UNKNOWN";
+  const withinIdeal = primaryMinutes <= primaryPreference.idealMinutes
+    && (!partnerPreference || (partnerMinutes !== null && partnerMinutes <= partnerPreference.idealMinutes!));
+  if (withinIdeal) return "WITHIN_IDEAL";
+  const withinMaximum = primaryMinutes <= primaryPreference.maxMinutes
+    && (!partnerPreference || (partnerMinutes !== null && partnerMinutes <= partnerPreference.maxMinutes!));
+  return withinMaximum ? "WITHIN_MAX" : "OUTSIDE_MAX";
+}
+
+function familyCommuteMinutes(primary: number | null, partner: number | null, hasPartner: boolean): number | null {
+  if (primary === null || (hasPartner && partner === null)) return null;
+  if (!hasPartner) return primary;
+  return primary * FAMILY_COMMUTE_WEIGHTS.primary + partner! * FAMILY_COMMUTE_WEIGHTS.partner;
+}
+
+function buildCommuteComparison(
+  top1: AICandidateDecisionContext,
+  top2: AICandidateDecisionContext,
+  preferences: BuyerPreferences,
+): AICommuteComparisonFact {
+  const top1Commute = top1.geoEvidence?.commute;
+  const top2Commute = top2.geoEvidence?.commute;
+  const primaryPreference = resolvePrimaryCommutePreference(preferences);
+  const partnerPreference = resolvePartnerCommutePreference(preferences);
+  const top1Primary = finiteOrNull(top1Commute?.primary?.selectedMinutes);
+  const top1Partner = finiteOrNull(top1Commute?.partner?.selectedMinutes);
+  const top2Primary = finiteOrNull(top2Commute?.primary?.selectedMinutes);
+  const top2Partner = finiteOrNull(top2Commute?.partner?.selectedMinutes);
+  const targetStatus = commuteTargetStatus(top1Primary, top1Partner, primaryPreference, partnerPreference);
+  const top1Family = familyCommuteMinutes(top1Primary, top1Partner, partnerPreference !== null);
+  const top2Family = familyCommuteMinutes(top2Primary, top2Partner, partnerPreference !== null);
+  let relation: AIComparisonRelation = "UNKNOWN";
+  if (top1Family !== null && top2Family !== null) {
+    const difference = top1Family - top2Family;
+    if (Math.abs(difference) < 0.5) relation = "EQUAL";
+    else if (Math.abs(difference) <= 3) relation = "CLOSE";
+    else if (difference < 0) relation = "TOP1_BETTER";
+    else relation = targetStatus === "WITHIN_IDEAL" || targetStatus === "WITHIN_MAX"
+      ? "TOP1_WORSE_BUT_WITHIN_TARGET"
+      : "TOP1_WORSE";
+  }
+  return {
+    relation,
+    top1PrimaryMinutes: top1Primary,
+    top1PartnerMinutes: top1Partner,
+    top2PrimaryMinutes: top2Primary,
+    top2PartnerMinutes: top2Partner,
+    primaryIdealMinutes: finiteOrNull(primaryPreference.idealMinutes),
+    primaryMaxMinutes: finiteOrNull(primaryPreference.maxMinutes),
+    partnerIdealMinutes: finiteOrNull(partnerPreference?.idealMinutes),
+    partnerMaxMinutes: finiteOrNull(partnerPreference?.maxMinutes),
+    top1TargetStatus: targetStatus,
+  };
+}
+
+function buildBudgetComparison(
+  top1: AICandidateDecisionContext,
+  top2: AICandidateDecisionContext,
+  maximumBudget: number,
+): AIBudgetComparisonFact {
+  const top1Price = top1.property.expectedTransactionPrice;
+  const top2Price = top2.property.expectedTransactionPrice;
+  const difference = top1Price - top2Price;
+  return {
+    relation: difference === 0 ? "EQUAL" : Math.abs(difference) <= 1 ? "CLOSE" : difference < 0 ? "TOP1_BETTER" : "TOP1_WORSE",
+    maximumBudget,
+    top1ExpectedTransactionPrice: top1Price,
+    top2ExpectedTransactionPrice: top2Price,
+    top1BudgetMargin: maximumBudget - top1Price,
+    top2BudgetMargin: maximumBudget - top2Price,
+  };
+}
+
+function buildCandidateComparisons(
+  candidates: AICandidateDecisionContext[],
+  preferences: BuyerPreferences,
+): AICandidateComparisonFacts | null {
+  const [top1, top2] = candidates;
+  if (!top1 || !top2) return null;
+  const top2Dimensions = new Map(top2.decision.dimensions.map((dimension) => [dimension.key, dimension]));
+  const budgetMatch = buildBudgetComparison(top1, top2, preferences.maximumBudget);
+  return {
+    primaryAlternativeId: top2.property.propertyId,
+    primaryAlternativeName: top2.property.name,
+    dimensions: top1.decision.dimensions.map((dimension) => {
+      const alternative = top2Dimensions.get(dimension.key);
+      return {
+        dimensionKey: dimension.key,
+        label: dimension.label,
+        relation: dimension.key === "budget_match"
+          ? budgetMatch.relation
+          : scoreRelation(dimension.score, alternative?.score ?? null),
+        top1Score: dimension.score,
+        top2Score: alternative?.score ?? null,
+      };
+    }),
+    commute: buildCommuteComparison(top1, top2, preferences),
+    budgetMatch,
+  };
+}
+
 /** Projects the complete authoritative comparison into an AI-safe allowlist. */
 export function projectAIAnalysisContext(input: AIInputProjectorInput): AIAnalysisContext {
   const propertyById = new Map(input.properties.map((property) => [property.id, property]));
@@ -235,5 +356,6 @@ export function projectAIAnalysisContext(input: AIInputProjectorInput): AIAnalys
     rankingProvisional: input.engine.rankingProvisional,
     preferences: projectPreferences(input.preferences),
     candidates,
+    candidateComparisons: buildCandidateComparisons(candidates, input.preferences),
   };
 }

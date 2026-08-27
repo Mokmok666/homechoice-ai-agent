@@ -81,6 +81,8 @@ export async function POST(request: Request): Promise<NextResponse<AIAnalysisRes
       requiresCommuteBoundaryNuance(requestValidation.data),
       {
         educationNeed: requestValidation.data.context.preferences.educationNeed,
+        comparisons: requestValidation.data.context.candidateComparisons,
+        topPropertyName: requestValidation.data.context.candidates[0]?.property.name ?? undefined,
         dimensions: requestValidation.data.context.candidates[0]?.decision.dimensions.map((dimension) => ({
           label: dimension.label,
           score: dimension.score,

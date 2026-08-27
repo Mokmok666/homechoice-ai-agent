@@ -128,6 +128,53 @@ export interface AIWebEvidenceContext {
   fetchedAt: string;
   dimensions: AIWebDimensionEvidenceContext[];
 }
+
+export type AIComparisonRelation =
+  | "TOP1_BETTER"
+  | "TOP1_WORSE"
+  | "TOP1_WORSE_BUT_WITHIN_TARGET"
+  | "EQUAL"
+  | "CLOSE"
+  | "UNKNOWN";
+
+export interface AIDimensionComparisonFact {
+  dimensionKey: DimensionKey;
+  label: string;
+  relation: Exclude<AIComparisonRelation, "TOP1_WORSE_BUT_WITHIN_TARGET">;
+  top1Score: number | null;
+  top2Score: number | null;
+}
+
+export interface AICommuteComparisonFact {
+  relation: AIComparisonRelation;
+  top1PrimaryMinutes: number | null;
+  top1PartnerMinutes: number | null;
+  top2PrimaryMinutes: number | null;
+  top2PartnerMinutes: number | null;
+  primaryIdealMinutes: number | null;
+  primaryMaxMinutes: number | null;
+  partnerIdealMinutes: number | null;
+  partnerMaxMinutes: number | null;
+  top1TargetStatus: "WITHIN_IDEAL" | "WITHIN_MAX" | "OUTSIDE_MAX" | "UNKNOWN";
+}
+
+export interface AIBudgetComparisonFact {
+  relation: Exclude<AIComparisonRelation, "TOP1_WORSE_BUT_WITHIN_TARGET">;
+  maximumBudget: number;
+  top1ExpectedTransactionPrice: number;
+  top2ExpectedTransactionPrice: number;
+  top1BudgetMargin: number;
+  top2BudgetMargin: number;
+}
+
+export interface AICandidateComparisonFacts {
+  primaryAlternativeId: string;
+  primaryAlternativeName: string | null;
+  dimensions: AIDimensionComparisonFact[];
+  commute: AICommuteComparisonFact;
+  budgetMatch: AIBudgetComparisonFact;
+}
+
 export interface AICandidateDecisionContext {
   property: AIPropertyContext;
   decision: AIDecisionContext;
@@ -142,6 +189,7 @@ export interface AIAnalysisContext {
   rankingProvisional: boolean;
   preferences: AIBuyerPreferencesContext;
   candidates: AICandidateDecisionContext[];
+  candidateComparisons: AICandidateComparisonFacts | null;
 }
 export interface AIAnalysisRequest {
   schemaVersion: typeof AI_ANALYSIS_SCHEMA_VERSION;
