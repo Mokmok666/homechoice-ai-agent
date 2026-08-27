@@ -5,7 +5,8 @@ import { useEffect, useState } from "react";
 import { Building2, MapPin, Pencil, Plus, Trash2, TrainFront } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { deleteProperty, getProperties, MAX_PROPERTIES } from "@/lib/property-storage";
+import { useSupabaseAuth } from "@/components/providers/supabase-auth-provider";
+import { deletePersistedProperty, loadProperties, MAX_PROPERTIES } from "@/lib/property-storage";
 import type { Property, PropertyStatus } from "@/types/property";
 
 const STATUS_LABELS: Record<PropertyStatus, string> = {
@@ -25,17 +26,24 @@ const STATUS_STYLES: Record<PropertyStatus, string> = {
 };
 
 export function PropertyList() {
+  const { authReady, userId, supabaseAvailable } = useSupabaseAuth();
   const [properties, setProperties] = useState<Property[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    setProperties(getProperties());
-    setIsLoading(false);
-  }, []);
+    if (!authReady) return;
+    let active = true;
+    void loadProperties(userId).then((loaded) => {
+      if (active) setProperties(loaded);
+    }).finally(() => {
+      if (active) setIsLoading(false);
+    });
+    return () => { active = false; };
+  }, [authReady, userId]);
 
-  function handleDelete(property: Property) {
+  async function handleDelete(property: Property) {
     if (!window.confirm(`确定删除“${property.name}”吗？`)) return;
-    setProperties(deleteProperty(property.id));
+    setProperties(await deletePersistedProperty(property.id, userId));
   }
 
   if (isLoading) {
@@ -53,7 +61,7 @@ export function PropertyList() {
       <div className="mt-7 flex flex-col gap-4 rounded-2xl border border-[#e5e3dd] bg-white/60 p-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm font-medium">已添加 {properties.length} / {MAX_PROPERTIES} 套候选房源</p>
-          <p className="mt-1 text-sm text-[#858782]">房源保存在当前浏览器中，清除浏览器数据后将无法恢复。</p>
+          <p className="mt-1 text-sm text-[#858782]">{supabaseAvailable ? "房源已保存到您的匿名云端空间，并在当前浏览器保留副本。" : "房源暂时保存在当前浏览器中。"}</p>
         </div>
         {properties.length < MAX_PROPERTIES ? (
           <Button asChild className="shrink-0 bg-white text-[#353833] ring-1 ring-[#dbdad5] hover:bg-[#f4f3ee]">

@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowRight, CalendarDays, Clock3, Home, Star, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { deleteDecisionHistory, getDecisionHistory } from "@/lib/decision-history-storage";
+import { useSupabaseAuth } from "@/components/providers/supabase-auth-provider";
+import { deletePersistedDecisionHistory, loadDecisionHistory } from "@/lib/decision-history-storage";
 import { RECOMMENDATION_BADGE_STYLES, RECOMMENDATION_LABELS } from "@/lib/recommendation-presentation";
 import type { DecisionHistoryRecord } from "@/types/decision-history";
 
@@ -19,10 +20,18 @@ function formatSavedAt(value: string): string {
 }
 
 export function DecisionHistoryList() {
+  const { authReady, userId } = useSupabaseAuth();
   const [records, setRecords] = useState<DecisionHistoryRecord[] | null>(null);
   const [pendingDelete, setPendingDelete] = useState<DecisionHistoryRecord | null>(null);
 
-  useEffect(() => setRecords(getDecisionHistory()), []);
+  useEffect(() => {
+    if (!authReady) return;
+    let active = true;
+    void loadDecisionHistory(userId).then((loaded) => {
+      if (active) setRecords(loaded);
+    });
+    return () => { active = false; };
+  }, [authReady, userId]);
 
   if (records === null) return <div className="card h-64 animate-pulse" aria-label="正在加载决策记录" />;
 
@@ -79,8 +88,8 @@ export function DecisionHistoryList() {
             <p className="mt-2 text-sm leading-6 text-[#747772]">删除后将无法在本浏览器中恢复，但不会影响当前房源和购房偏好。</p>
             <div className="mt-6 flex justify-end gap-3">
               <Button type="button" onClick={() => setPendingDelete(null)} className="bg-white text-[#4f544d] ring-1 ring-[#ddddd6] hover:bg-[#f4f3ee]">取消</Button>
-              <Button type="button" onClick={() => {
-                setRecords(deleteDecisionHistory(pendingDelete.id));
+              <Button type="button" onClick={async () => {
+                setRecords(await deletePersistedDecisionHistory(pendingDelete.id, userId));
                 setPendingDelete(null);
               }} className="bg-[#9b5a50] text-white hover:bg-[#864a42]">删除</Button>
             </div>

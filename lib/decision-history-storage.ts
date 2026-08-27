@@ -6,6 +6,7 @@ import type {
 } from "@/types/decision-history";
 import type { Recommendation } from "@/types/decision";
 import { validatePropertyIntelligence } from "@/lib/ai/property-intelligence-validation";
+import { deleteCloudHistory, insertCloudHistory, listCloudHistory } from "@/lib/supabase/history-repository";
 
 export const DECISION_HISTORY_STORAGE_KEY = "homechoice.decision-history.v1";
 
@@ -159,5 +160,57 @@ export function deleteDecisionHistory(id: string): DecisionHistoryRecord[] {
     records,
   };
   window.localStorage.setItem(DECISION_HISTORY_STORAGE_KEY, JSON.stringify(envelope));
+  return records;
+}
+
+export function replaceLocalDecisionHistory(values: readonly unknown[]): DecisionHistoryRecord[] {
+  const records = values
+    .filter(isValidHistoryRecord)
+    .map(cloneSnapshot)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .slice(0, MAX_HISTORY_RECORDS);
+  if (values.length > 0 && records.length === 0) return getDecisionHistory();
+  if (typeof window !== "undefined") {
+    const envelope: DecisionHistoryStorage = { schemaVersion: DECISION_HISTORY_SCHEMA_VERSION, records };
+    window.localStorage.setItem(DECISION_HISTORY_STORAGE_KEY, JSON.stringify(envelope));
+  }
+  return records;
+}
+
+export async function loadDecisionHistory(userId: string | null): Promise<DecisionHistoryRecord[]> {
+  if (!userId) return getDecisionHistory();
+  try {
+    return replaceLocalDecisionHistory(await listCloudHistory(userId));
+  } catch (error) {
+    if (process.env.NODE_ENV === "development") console.error("Supabase history load failed", error);
+    return getDecisionHistory();
+  }
+}
+
+export async function loadDecisionHistoryById(id: string, userId: string | null): Promise<DecisionHistoryRecord | null> {
+  return (await loadDecisionHistory(userId)).find((record) => record.id === id) ?? null;
+}
+
+export async function savePersistedDecisionHistory(input: DecisionHistoryInput, userId: string | null): Promise<DecisionHistoryRecord> {
+  const record = saveDecisionHistory(input);
+  if (userId) {
+    try {
+      await insertCloudHistory(userId, record);
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") console.error("Supabase history save failed", error);
+    }
+  }
+  return record;
+}
+
+export async function deletePersistedDecisionHistory(id: string, userId: string | null): Promise<DecisionHistoryRecord[]> {
+  const records = deleteDecisionHistory(id);
+  if (userId) {
+    try {
+      await deleteCloudHistory(userId, id);
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") console.error("Supabase history delete failed", error);
+    }
+  }
   return records;
 }

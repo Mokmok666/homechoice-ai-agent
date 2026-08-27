@@ -5,17 +5,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, Check, ChevronDown, CircleAlert, Database, Save, Sparkles } from "lucide-react";
 import { AIAnalysisPanel } from "@/components/ai/ai-analysis-panel";
 import { Button } from "@/components/ui/button";
+import { useSupabaseAuth } from "@/components/providers/supabase-auth-provider";
 import { findAIAnalysisBySignature } from "@/lib/ai-analysis-storage";
 import { refreshGeoEvidenceForProperties } from "@/lib/amap/evidence-client";
 import { projectAIAnalysisContext } from "@/lib/ai/input";
 import { createAIInputSignature } from "@/lib/ai/signature";
-import { BUYER_PREFERENCES_STORAGE_KEY, loadBuyerPreferences } from "@/lib/buyer-preferences-storage";
+import { BUYER_PREFERENCES_STORAGE_KEY, loadPersistedBuyerPreferences } from "@/lib/buyer-preferences-storage";
 import { runDecisionEngine } from "@/lib/decision/engine";
 import { generateDecisionReasons } from "@/lib/decision/reason-generator";
 import { buildDecisionRisks, buildDecisionSummary, buildQuickComparison } from "@/lib/decision-presentation";
-import { saveDecisionHistory } from "@/lib/decision-history-storage";
+import { savePersistedDecisionHistory } from "@/lib/decision-history-storage";
 import { GEO_EVIDENCE_STORAGE_KEY, loadCachedGeoEvidenceForProperties } from "@/lib/geo-evidence-storage";
-import { getProperties, PROPERTY_STORAGE_KEY } from "@/lib/property-storage";
+import { loadProperties, PROPERTY_STORAGE_KEY } from "@/lib/property-storage";
 import { RECOMMENDATION_BADGE_STYLES, RECOMMENDATION_LABELS } from "@/lib/recommendation-presentation";
 import { WEB_EVIDENCE_STORAGE_KEY, loadCachedWebEvidenceForProperties } from "@/lib/web-evidence-storage";
 import { refreshWebEvidenceForProperties } from "@/lib/web-evidence/client";
@@ -58,18 +59,24 @@ function getAIOverallSummary(
 }
 
 export function DecisionResults() {
+  const { authReady, userId } = useSupabaseAuth();
   const [state, setState] = useState<ResultsState>({ properties: [], preferences: null, engine: null, message: null, geoEvidenceCount: 0, geoEvidenceByProperty: {}, webEvidenceByProperty: {} });
   const [isLoading, setIsLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
   const geoRequestRef = useRef<AbortController | null>(null);
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback(async () => {
+    if (!authReady) return;
     geoRequestRef.current?.abort();
     const geoController = new AbortController();
     geoRequestRef.current = geoController;
     setSaveStatus("idle");
-    const manualProperties = getProperties().filter((property) => property.source === "manual");
-    const preferencesResult = loadBuyerPreferences();
+    setIsLoading(true);
+    const [allProperties, preferencesResult] = await Promise.all([
+      loadProperties(userId),
+      loadPersistedBuyerPreferences(userId),
+    ]);
+    const manualProperties = allProperties.filter((property) => property.source === "manual");
     if (preferencesResult.status !== "valid") {
       setState({
         properties: manualProperties,
@@ -183,12 +190,12 @@ export function DecisionResults() {
       setState({ properties: manualProperties, preferences: preferencesResult.preferences, engine: null, message: error instanceof Error ? error.message : "无法生成分析结果。", geoEvidenceCount: 0, geoEvidenceByProperty: {}, webEvidenceByProperty: {} });
     }
     setIsLoading(false);
-  }, []);
+  }, [authReady, userId]);
 
   useEffect(() => {
-    refresh();
+    void refresh();
     function handleStorage(event: StorageEvent) {
-      if (event.key === PROPERTY_STORAGE_KEY || event.key === BUYER_PREFERENCES_STORAGE_KEY || event.key === GEO_EVIDENCE_STORAGE_KEY || event.key === WEB_EVIDENCE_STORAGE_KEY) refresh();
+      if (event.key === PROPERTY_STORAGE_KEY || event.key === BUYER_PREFERENCES_STORAGE_KEY || event.key === GEO_EVIDENCE_STORAGE_KEY || event.key === WEB_EVIDENCE_STORAGE_KEY) void refresh();
     }
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
@@ -196,12 +203,12 @@ export function DecisionResults() {
 
   useEffect(() => () => geoRequestRef.current?.abort(), []);
 
-  function handleSaveDecision(): void {
+  async function handleSaveDecision(): Promise<void> {
     if (!state.engine || !state.preferences) return;
     const topResult = state.engine.results[0];
     const topProperty = state.properties.find((property) => property.id === topResult?.propertyId);
     try {
-      saveDecisionHistory({
+      await savePersistedDecisionHistory({
         title: topProperty
           ? `${topProperty.name} 等 ${state.properties.length} 套房源对比`
           : `${state.properties.length} 套房源决策`,
@@ -217,7 +224,7 @@ export function DecisionResults() {
           rankedResults: state.engine.results,
           geoEvidenceByProperty: state.geoEvidenceByProperty,
         }),
-      });
+      }, userId);
       setSaveStatus("saved");
     } catch {
       setSaveStatus("error");

@@ -4,12 +4,13 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AlertCircle, ArrowLeft, CheckCircle2, Clock3, Database, HelpCircle, Sparkles } from "lucide-react";
 import { ScoreRing } from "@/components/decision/score-ring";
+import { useSupabaseAuth } from "@/components/providers/supabase-auth-provider";
 import { refreshGeoEvidenceForProperties } from "@/lib/amap/evidence-client";
-import { loadBuyerPreferences } from "@/lib/buyer-preferences-storage";
+import { loadPersistedBuyerPreferences } from "@/lib/buyer-preferences-storage";
 import { DIMENSION_LABELS, DIMENSION_TYPE_LABELS, DIMENSION_TYPES } from "@/lib/decision/dimensions";
 import { runDecisionEngine } from "@/lib/decision/engine";
 import { loadCachedGeoEvidenceForProperties } from "@/lib/geo-evidence-storage";
-import { getProperties } from "@/lib/property-storage";
+import { loadProperties } from "@/lib/property-storage";
 import { RECOMMENDATION_BADGE_STYLES, RECOMMENDATION_LABELS } from "@/lib/recommendation-presentation";
 import { loadCachedWebEvidenceForProperties } from "@/lib/web-evidence-storage";
 import { refreshWebEvidenceForProperties } from "@/lib/web-evidence/client";
@@ -48,21 +49,28 @@ interface DetailState {
 }
 
 export function DecisionDetail({ propertyId }: { propertyId: string }) {
+  const { authReady, userId } = useSupabaseAuth();
   const [state, setState] = useState<DetailState | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!authReady) return;
     const controller = new AbortController();
-    const properties = getProperties().filter((property) => property.source === "manual");
+    async function initialize() {
+    const [allProperties, preferences] = await Promise.all([
+      loadProperties(userId),
+      loadPersistedBuyerPreferences(userId),
+    ]);
+    if (controller.signal.aborted) return;
+    const properties = allProperties.filter((property) => property.source === "manual");
     const property = properties.find((item) => item.id === propertyId);
     if (!property) {
       setMessage("该房源已被删除、不可用，或属于不参与真实分析的演示数据。");
-      return () => controller.abort();
+      return;
     }
-    const preferences = loadBuyerPreferences();
     if (preferences.status !== "valid") {
       setMessage("购房偏好不可用，请重新保存偏好后再查看分析。");
-      return () => controller.abort();
+      return;
     }
     const asOfDate = new Date().toISOString().slice(0, 10);
     try {
@@ -81,7 +89,7 @@ export function DecisionDetail({ propertyId }: { propertyId: string }) {
       const result = engine.results.find((item) => item.propertyId === propertyId);
       if (!result) {
         setMessage("该房源没有可用的分析结果。");
-        return () => controller.abort();
+        return;
       }
       setState({ property, result, asOfDate, rankingProvisional: engine.rankingProvisional, webEvidence: cachedWebEvidence[property.id] ?? null, educationApplicable: preferences.preferences.educationNeed !== "none" });
       const refreshOrder = [property, ...properties.filter((item) => item.id !== property.id)];
@@ -161,8 +169,10 @@ export function DecisionDetail({ propertyId }: { propertyId: string }) {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "无法生成房源分析。");
     }
+    }
+    void initialize();
     return () => controller.abort();
-  }, [propertyId]);
+  }, [authReady, propertyId, userId]);
 
   if (message) {
     return (

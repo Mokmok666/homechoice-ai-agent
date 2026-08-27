@@ -9,6 +9,7 @@ import {
   type BuyerPreferencesInput,
   type ConfirmedWorkLocation,
 } from "@/types/buyer-preferences";
+import { getCloudPreferences, upsertCloudPreferences } from "@/lib/supabase/preferences-repository";
 
 export const BUYER_PREFERENCES_STORAGE_KEY = "homechoice.buyer-preferences.v1";
 const SCHEMA_VERSION = 1;
@@ -223,5 +224,45 @@ export function saveBuyerPreferences(
     preferences,
   };
   window.localStorage.setItem(BUYER_PREFERENCES_STORAGE_KEY, JSON.stringify(envelope));
+  return preferences;
+}
+
+export function replaceLocalBuyerPreferences(value: unknown): BuyerPreferencesLoadResult {
+  if (typeof window === "undefined") return { status: "empty" };
+  const sanitized = sanitizeOptionalLocations(value);
+  if (!isBuyerPreferences(sanitized)) {
+    return { status: "invalid", message: "云端偏好数据格式无效，已保留当前浏览器数据。" };
+  }
+  const envelope: BuyerPreferencesEnvelope = { schemaVersion: SCHEMA_VERSION, preferences: sanitized };
+  window.localStorage.setItem(BUYER_PREFERENCES_STORAGE_KEY, JSON.stringify(envelope));
+  return { status: "valid", preferences: sanitized };
+}
+
+export async function loadPersistedBuyerPreferences(userId: string | null): Promise<BuyerPreferencesLoadResult> {
+  if (!userId) return loadBuyerPreferences();
+  try {
+    const cloudValue = await getCloudPreferences(userId);
+    if (cloudValue === null) return { status: "empty" };
+    const cloudResult = replaceLocalBuyerPreferences(cloudValue);
+    return cloudResult.status === "invalid" ? loadBuyerPreferences() : cloudResult;
+  } catch (error) {
+    if (process.env.NODE_ENV === "development") console.error("Supabase preferences load failed", error);
+    return loadBuyerPreferences();
+  }
+}
+
+export async function savePersistedBuyerPreferences(
+  input: BuyerPreferencesInput,
+  existingPreferences: BuyerPreferences | null,
+  userId: string | null,
+): Promise<BuyerPreferences> {
+  const preferences = saveBuyerPreferences(input, existingPreferences);
+  if (userId) {
+    try {
+      await upsertCloudPreferences(userId, preferences);
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") console.error("Supabase preferences save failed", error);
+    }
+  }
   return preferences;
 }

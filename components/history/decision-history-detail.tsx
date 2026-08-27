@@ -6,7 +6,8 @@ import { AlertCircle, ArrowLeft, Building2, CalendarDays, MapPin, Sparkles } fro
 import { ScoreRing } from "@/components/decision/score-ring";
 import { StructuredNarrative } from "@/components/ai/structured-narrative";
 import { PropertyIntelligenceCard } from "@/components/intelligence/property-intelligence-card";
-import { getDecisionHistoryById } from "@/lib/decision-history-storage";
+import { useSupabaseAuth } from "@/components/providers/supabase-auth-provider";
+import { loadDecisionHistoryById } from "@/lib/decision-history-storage";
 import { DIMENSION_LABELS } from "@/lib/decision/dimensions";
 import { RECOMMENDATION_BADGE_STYLES, RECOMMENDATION_LABELS, RECOMMENDATION_TEXT_STYLES } from "@/lib/recommendation-presentation";
 import type { DecisionHistoryRecord } from "@/types/decision-history";
@@ -24,9 +25,17 @@ function historicalDimensionLabel(key: string): string {
 }
 
 export function DecisionHistoryDetail({ historyId }: { historyId: string }) {
+  const { authReady, userId } = useSupabaseAuth();
   const [record, setRecord] = useState<DecisionHistoryRecord | null | undefined>(undefined);
 
-  useEffect(() => setRecord(getDecisionHistoryById(historyId)), [historyId]);
+  useEffect(() => {
+    if (!authReady) return;
+    let active = true;
+    void loadDecisionHistoryById(historyId, userId).then((loaded) => {
+      if (active) setRecord(loaded);
+    });
+    return () => { active = false; };
+  }, [authReady, historyId, userId]);
 
   if (record === undefined) return <main className="page"><div className="card h-80 animate-pulse" aria-label="正在加载历史决策" /></main>;
   if (record === null) {

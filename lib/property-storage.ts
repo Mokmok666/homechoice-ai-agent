@@ -11,6 +11,7 @@ import {
   type PropertyInput,
   type PropertyStatus,
 } from "@/types/property";
+import { deleteCloudProperty, listCloudProperties, upsertCloudProperty } from "@/lib/supabase/property-repository";
 
 export const PROPERTY_STORAGE_KEY = "homechoice.properties.v1";
 export const MAX_PROPERTIES = 5;
@@ -245,6 +246,15 @@ function writeProperties(properties: Property[]): void {
   window.localStorage.setItem(PROPERTY_STORAGE_KEY, JSON.stringify(properties));
 }
 
+export function replaceLocalProperties(values: readonly unknown[]): Property[] {
+  const properties = values
+    .map(normalizeProperty)
+    .filter((property): property is Property => property !== null);
+  if (values.length > 0 && properties.length === 0) return getProperties();
+  writeProperties(properties);
+  return properties;
+}
+
 export function getProperties(): Property[] {
   if (typeof window === "undefined") return [];
 
@@ -321,5 +331,55 @@ export function updateProperty(id: string, input: PropertyInput): Property {
 export function deleteProperty(id: string): Property[] {
   const properties = getProperties().filter((property) => property.id !== id);
   writeProperties(properties);
+  return properties;
+}
+
+export async function loadProperties(userId: string | null): Promise<Property[]> {
+  if (!userId) return getProperties();
+  try {
+    return replaceLocalProperties(await listCloudProperties(userId));
+  } catch (error) {
+    if (process.env.NODE_ENV === "development") console.error("Supabase properties load failed", error);
+    return getProperties();
+  }
+}
+
+export async function loadProperty(id: string, userId: string | null): Promise<Property | undefined> {
+  return (await loadProperties(userId)).find((property) => property.id === id);
+}
+
+export async function createPersistedProperty(input: PropertyInput, userId: string | null): Promise<Property> {
+  const property = createProperty(input);
+  if (userId) {
+    try {
+      await upsertCloudProperty(userId, property);
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") console.error("Supabase property save failed", error);
+    }
+  }
+  return property;
+}
+
+export async function updatePersistedProperty(id: string, input: PropertyInput, userId: string | null): Promise<Property> {
+  const property = updateProperty(id, input);
+  if (userId) {
+    try {
+      await upsertCloudProperty(userId, property);
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") console.error("Supabase property save failed", error);
+    }
+  }
+  return property;
+}
+
+export async function deletePersistedProperty(id: string, userId: string | null): Promise<Property[]> {
+  const properties = deleteProperty(id);
+  if (userId) {
+    try {
+      await deleteCloudProperty(userId, id);
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") console.error("Supabase property delete failed", error);
+    }
+  }
   return properties;
 }

@@ -16,7 +16,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { LocationConfirmation } from "@/components/property/location-confirmation";
-import { createProperty, getProperty, updateProperty } from "@/lib/property-storage";
+import { createPersistedProperty, loadProperty, updatePersistedProperty } from "@/lib/property-storage";
+import { useSupabaseAuth } from "@/components/providers/supabase-auth-provider";
 import type { ComparableTransaction, ConfirmedPropertyLocation, FloorLevel, Orientation, PropertyInput } from "@/types/property";
 
 const LAYOUT_OPTIONS = [
@@ -242,16 +243,24 @@ function FieldError({ id, message }: { id: string; message?: string }) {
 
 export function PropertyForm() {
   const router = useRouter();
+  const { authReady, userId } = useSupabaseAuth();
   const [form, setForm] = useState<PropertyFormState>(EMPTY_FORM);
   const [errors, setErrors] = useState<FormErrors>({});
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingProperty, setIsLoadingProperty] = useState(true);
   const [confirmedLocation, setConfirmedLocation] = useState<ConfirmedPropertyLocation | null>(null);
 
   useEffect(() => {
+    if (!authReady) return;
+    let active = true;
     const id = new URLSearchParams(window.location.search).get("id");
-    if (!id) return;
-    const property = getProperty(id);
+    if (!id) {
+      setIsLoadingProperty(false);
+      return () => { active = false; };
+    }
+    void loadProperty(id, userId).then((property) => {
+    if (!active) return;
     if (!property) {
       setErrors({ form: "未找到需要编辑的房源，请返回房源列表重试。" });
       return;
@@ -293,7 +302,11 @@ export function PropertyForm() {
         area: String(item.area),
       })),
     });
-  }, []);
+    }).finally(() => {
+      if (active) setIsLoadingProperty(false);
+    });
+    return () => { active = false; };
+  }, [authReady, userId]);
 
   function updateField(field: PropertyTextField, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -347,7 +360,7 @@ export function PropertyForm() {
     if (errors.comparableTransactions) setErrors((current) => ({ ...current, comparableTransactions: undefined }));
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const nextErrors = validateForm(form);
     if (Object.keys(nextErrors).length > 0) {
@@ -412,14 +425,16 @@ export function PropertyForm() {
 
     setIsSubmitting(true);
     try {
-      if (editingId) updateProperty(editingId, input);
-      else createProperty(input);
+      if (editingId) await updatePersistedProperty(editingId, input, userId);
+      else await createPersistedProperty(input, userId);
       router.push("/properties");
     } catch (error) {
       setErrors({ form: error instanceof Error ? error.message : "保存失败，请稍后重试。" });
       setIsSubmitting(false);
     }
   }
+
+  if (isLoadingProperty) return <div className="card mt-7 h-64 animate-pulse" aria-label="正在读取您的房源" />;
 
   return (
     <form onSubmit={handleSubmit} noValidate className="mt-7 space-y-6">

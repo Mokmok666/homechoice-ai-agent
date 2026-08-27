@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { loadBuyerPreferences, saveBuyerPreferences } from "@/lib/buyer-preferences-storage";
+import { loadPersistedBuyerPreferences, savePersistedBuyerPreferences } from "@/lib/buyer-preferences-storage";
+import { useSupabaseAuth } from "@/components/providers/supabase-auth-provider";
 import { WorkLocationConfirmation } from "./work-location-confirmation";
 import {
   SELECTABLE_COMMUTE_MODES,
@@ -147,15 +148,20 @@ function ChoiceButton({ selected, disabled = false, onClick, children, described
 }
 
 export function BuyerPreferencesForm() {
+  const { authReady, userId, supabaseAvailable } = useSupabaseAuth();
   const router = useRouter();
   const [form, setForm] = useState<PreferenceFormState>(EMPTY_FORM);
   const [errors, setErrors] = useState<FormErrors>({});
   const [existingPreferences, setExistingPreferences] = useState<BuyerPreferences | null>(null);
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingPreferences, setIsLoadingPreferences] = useState(true);
 
   useEffect(() => {
-    const result = loadBuyerPreferences();
+    if (!authReady) return;
+    let active = true;
+    void loadPersistedBuyerPreferences(userId).then((result) => {
+    if (!active) return;
     if (result.status === "invalid") {
       setStorageWarning(result.message);
       return;
@@ -180,7 +186,11 @@ export function BuyerPreferencesForm() {
       educationStages: saved.educationStages,
       topPriorities: saved.topPriorities,
     });
-  }, []);
+    }).finally(() => {
+      if (active) setIsLoadingPreferences(false);
+    });
+    return () => { active = false; };
+  }, [authReady, userId]);
 
   function updateField<K extends keyof PreferenceFormState>(field: K, value: PreferenceFormState[K]) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -223,7 +233,7 @@ export function BuyerPreferencesForm() {
     };
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const nextErrors = validateForm(form);
     if (Object.keys(nextErrors).length > 0) {
@@ -254,13 +264,15 @@ export function BuyerPreferencesForm() {
 
     setIsSubmitting(true);
     try {
-      saveBuyerPreferences(input, existingPreferences);
+      await savePersistedBuyerPreferences(input, existingPreferences, userId);
       router.push("/results");
     } catch {
       setErrors({ form: "偏好保存失败，请确认浏览器允许本地存储后重试。" });
       setIsSubmitting(false);
     }
   }
+
+  if (isLoadingPreferences) return <div className="card mt-7 h-64 animate-pulse" aria-label="正在读取您的购房偏好" />;
 
   return (
     <form onSubmit={handleSubmit} noValidate className="mt-7">
@@ -339,7 +351,7 @@ export function BuyerPreferencesForm() {
 
       <div className="mt-7 flex flex-col items-center">
         <Button type="submit" disabled={isSubmitting} className="h-14 w-full max-w-md text-base disabled:cursor-not-allowed disabled:opacity-60">{isSubmitting ? "正在保存…" : "保存偏好并查看分析"}<ArrowRight size={18} /></Button>
-        <div className="mt-3 flex items-center gap-2 text-[13px] text-[#8a8c87]"><LockKeyhole size={13} />偏好仅保存在当前浏览器，用于后续分析</div>
+        <div className="mt-3 flex items-center gap-2 text-[13px] text-[#8a8c87]"><LockKeyhole size={13} />{supabaseAvailable ? "偏好已保存到您的匿名云端空间" : "偏好暂时保存在当前浏览器"}</div>
       </div>
     </form>
   );
