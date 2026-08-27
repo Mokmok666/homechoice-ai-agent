@@ -4,6 +4,7 @@ import { FAMILY_COMMUTE_WEIGHTS } from "../commute-evidence";
 import { resolvePartnerCommutePreference, resolvePrimaryCommutePreference } from "../../types/buyer-preferences";
 import type {
   AIAnalysisContext,
+  AIBuildingAreaComparisonFact,
   AIBudgetComparisonFact,
   AIBuyerPreferencesContext,
   AICandidateComparisonFacts,
@@ -303,6 +304,23 @@ function buildBudgetComparison(
   };
 }
 
+function buildBuildingAreaComparison(
+  top1: AICandidateDecisionContext,
+  top2: AICandidateDecisionContext,
+): AIBuildingAreaComparisonFact {
+  const top1Area = finiteOrNull(top1.property.area);
+  const top2Area = finiteOrNull(top2.property.area);
+  return {
+    relation: top1Area === null || top2Area === null
+      ? "UNKNOWN"
+      : top1Area === top2Area
+        ? "EQUAL"
+        : top1Area > top2Area ? "TOP1_LARGER" : "TOP1_SMALLER",
+    top1SquareMeters: top1Area,
+    top2SquareMeters: top2Area,
+  };
+}
+
 function buildCandidateComparisons(
   candidates: AICandidateDecisionContext[],
   preferences: BuyerPreferences,
@@ -328,6 +346,7 @@ function buildCandidateComparisons(
     }),
     commute: buildCommuteComparison(top1, top2, preferences),
     budgetMatch,
+    buildingArea: buildBuildingAreaComparison(top1, top2),
   };
 }
 

@@ -167,12 +167,19 @@ export interface AIBudgetComparisonFact {
   top2BudgetMargin: number;
 }
 
+export interface AIBuildingAreaComparisonFact {
+  relation: "TOP1_LARGER" | "TOP1_SMALLER" | "EQUAL" | "UNKNOWN";
+  top1SquareMeters: number | null;
+  top2SquareMeters: number | null;
+}
+
 export interface AICandidateComparisonFacts {
   primaryAlternativeId: string;
   primaryAlternativeName: string | null;
   dimensions: AIDimensionComparisonFact[];
   commute: AICommuteComparisonFact;
   budgetMatch: AIBudgetComparisonFact;
+  buildingArea: AIBuildingAreaComparisonFact;
 }
 
 export interface AICandidateDecisionContext {

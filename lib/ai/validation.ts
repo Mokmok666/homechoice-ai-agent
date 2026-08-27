@@ -6,7 +6,7 @@ import {
   type AIComparisonRelation,
 } from "../../types/ai-analysis";
 import { DECISION_PRIORITIES, EDUCATION_NEEDS, EDUCATION_STAGES, PURCHASE_PURPOSES, SELECTABLE_COMMUTE_MODES } from "../../types/buyer-preferences";
-import { DIMENSION_KEYS } from "../../types/decision";
+import { DIMENSION_KEYS, type DimensionKey } from "../../types/decision";
 import { WEB_EVIDENCE_TARGET_DIMENSIONS } from "../web-evidence/types";
 
 export type ValidationResult<T> = { success: true; data: T } | { success: false; errors: string[] };
@@ -25,12 +25,24 @@ const COMMUTE_ADVANTAGE_LANGUAGE = /更短|更快|更便利|更匹配|更优|优
 const NEGATED_ADVANTAGE_LANGUAGE = /没有.{0,8}优势|并无.{0,8}优势|不具备.{0,8}优势|不能.{0,8}(?:称为|视为).{0,8}优势|不应.{0,8}(?:称为|视为).{0,8}优势/;
 const RELATIVE_INEQUALITY_LANGUAGE = /略逊|逊于|不如|优于|领先于|更强|更弱|更好|更差|更便利|优势更明显|明显优势/;
 const CANDIDATE_ADVANTAGE_LANGUAGE = /更佳|更优|更强|更好|更便利|更匹配|略胜|略有优势|具有优势|优势明显|领先|优于|得分更高/;
+const BUILDING_AREA_RELATIONS = ["TOP1_LARGER", "TOP1_SMALLER", "EQUAL", "UNKNOWN"] as const;
+const SPACE_MATCH_CONCLUSION_LANGUAGE = /空间(?:需求)?匹配(?:度)?(?:更|较|略)?(?:优|高|好)|空间匹配(?:方面)?(?:表现)?(?:良好|较好|不错|有优势|无短板)|空间更匹配|更(?:符合|满足).{0,10}(?:家庭|您的|你的)?(?:空间)?需求|满足(?:了)?(?:您的|你的|家庭).{0,10}(?:空间)?需求|空间方面.{0,5}略胜|空间(?:更)?适合(?:您|家庭)|空间优势明显|居住空间更适合|(?:面积|平方米).{0,16}(?:更满足|满足.{0,6}需求|使.{0,6}更适合)|更大的面积.{0,12}(?:更适合|更匹配|满足)/;
+const LAYOUT_CONCLUSION_LANGUAGE = /户型(?:设计)?(?:更好|更优|更合理|表现良好|较好|符合.{0,8}需求)|(?:空间)?布局(?:更好|更优|更合理|表现良好|较好|符合.{0,8}需求)|使用率更高|居住体验更好/;
+const UNCERTAINTY_OR_NEGATION_LANGUAGE = /不能|无法|尚不能|尚无法|暂不能|不代表|并不意味着|不可|尚未明确|证据不足|暂无法判断/;
 
 export interface AINarrativeConsistencyConstraint {
-  dimensions: Array<{ label: string; score: number | null; status: "known" | "partial" | "unknown" }>;
+  dimensions: Array<{ key: DimensionKey; label: string; score: number | null; status: "known" | "partial" | "unknown" }>;
   educationNeed: "none" | "current" | "future";
   comparisons?: AICandidateComparisonFacts | null;
   topPropertyName?: string;
+}
+
+function hasUnsupportedUnknownConclusion(text: string, language: RegExp): boolean {
+  return text
+    .split(/[。！？；\n]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .some((clause) => language.test(clause) && !UNCERTAINTY_OR_NEGATION_LANGUAGE.test(clause));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
@@ -128,6 +140,13 @@ function validateRelativeComparisonConsistency(
     && clauses.some((clause) => /预算|预期成交价|资金余量/.test(clause) && /表现相当|基本相当|差异有限|基本一致/.test(clause))
   ) {
     errors.push("analysis.decisionSummary treats a material budget difference as equal");
+  }
+  if (
+    comparisons.primaryAlternativeName
+    && comparisons.budgetMatch.top2BudgetMargin >= 0
+    && clauses.some((clause) => referencesCandidateName(clause, comparisons.primaryAlternativeName!) && /超出.{0,8}预算|超预算/.test(clause))
+  ) {
+    errors.push("analysis.decisionSummary contradicts alternative budget boundary");
   }
   for (const dimension of comparisons.dimensions) {
     const language = dimensionLanguage(dimension.dimensionKey, dimension.label);
@@ -289,6 +308,17 @@ function validateCandidateComparisons(value: unknown, candidates: unknown[], err
   ) {
     errors.push("candidateComparisons.budgetMatch contradicts candidate prices");
   }
+  const buildingArea = value.buildingArea;
+  if (!isRecord(buildingArea) || !isOneOf(buildingArea.relation, BUILDING_AREA_RELATIONS) || !isNullableNumber(buildingArea.top1SquareMeters) || !isNullableNumber(buildingArea.top2SquareMeters)) {
+    errors.push("candidateComparisons.buildingArea is invalid");
+  } else {
+    const top1Area = top1Property.area as number;
+    const top2Area = top2Property.area as number;
+    const expectedAreaRelation = top1Area === top2Area ? "EQUAL" : top1Area > top2Area ? "TOP1_LARGER" : "TOP1_SMALLER";
+    if (buildingArea.top1SquareMeters !== top1Area || buildingArea.top2SquareMeters !== top2Area || buildingArea.relation !== expectedAreaRelation) {
+      errors.push("candidateComparisons.buildingArea contradicts candidate areas");
+    }
+  }
 }
 
 function validateContext(value: unknown, errors: string[]): void {
@@ -355,6 +385,14 @@ function validateAnalysis(
         if (educationClauses.length > 0 || (Array.isArray(analysis.pendingEvidence) && analysis.pendingEvidence.some((item) => typeof item === "string" && /教育|学校|学位|入学/.test(item)))) {
           errors.push("analysis must omit education when educationNeed is none");
         }
+      }
+      const spaceMatch = consistency.dimensions.find((dimension) => dimension.key === "space_match");
+      if ((spaceMatch?.score === null || spaceMatch?.status === "unknown") && hasUnsupportedUnknownConclusion(decisionSummary, SPACE_MATCH_CONCLUSION_LANGUAGE)) {
+        errors.push("analysis.decisionSummary infers household space match from unknown evidence");
+      }
+      const layoutDesign = consistency.dimensions.find((dimension) => dimension.key === "layout_design");
+      if ((layoutDesign?.score === null || layoutDesign?.status === "unknown") && hasUnsupportedUnknownConclusion(decisionSummary, LAYOUT_CONCLUSION_LANGUAGE)) {
+        errors.push("analysis.decisionSummary infers layout quality from unknown evidence");
       }
       if (consistency.comparisons && consistency.topPropertyName) {
         validateRelativeComparisonConsistency(
