@@ -15,7 +15,7 @@ const DIMENSION_STATUSES = ["known", "partial", "unknown"] as const;
 const CONFIDENCE_LEVELS = ["provisional", "supported"] as const;
 const ERROR_CODES = ["INVALID_REQUEST", "AI_NOT_CONFIGURED", "AI_TIMEOUT", "AI_PROVIDER_ERROR", "INVALID_AI_OUTPUT"] as const;
 const FORBIDDEN_ANALYSIS_KEYS = new Set(["score", "matchscore", "overallscore", "ranking", "recommendation", "weight", "weights"]);
-const INTERNAL_PRODUCT_LANGUAGE = /Top1|Top2|Decision Engine|排名第一|综合评分模型|AI判断|决策引擎认为|根据模型|当前确定性排序/i;
+const INTERNAL_PRODUCT_LANGUAGE = /Top1|Top2|Decision Engine|排名第一|综合评分模型|AI判断|决策引擎认为|根据模型|当前确定性排序|Evidence Gap|Narrative Facts|candidateComparisons|comparisonFacts|requiredFacts|nextStepFacts|prohibitedClaims|allowedMeaning|relationMeaning|TOP1_BETTER|TOP1_WORSE(?:_BUT_WITHIN_TARGET)?|UNKNOWN|EQUAL|CLOSE|validation|dimension key|internal score type|[a-z]+_[a-z_]+/i;
 const INTERNAL_PENDING_LANGUAGE = /结构化事实|外部证据进行AI分析|未来结合.*AI分析/;
 const ABSOLUTE_NEGATIVE_LANGUAGE = /不足|较差|明显弱|缺乏|短板|表现差|配套弱|品质不好/;
 const COMPARISON_RELATIONS = ["TOP1_BETTER", "TOP1_WORSE", "TOP1_WORSE_BUT_WITHIN_TARGET", "EQUAL", "CLOSE", "UNKNOWN"] as const;
@@ -404,7 +404,11 @@ function validateAnalysis(
       }
     }
   }
-  if (!isStringArray(analysis.pendingEvidence) || analysis.pendingEvidence.length > 5 || analysis.pendingEvidence.some((item) => !isNonEmptyString(item) || INTERNAL_PRODUCT_LANGUAGE.test(item) || INTERNAL_PENDING_LANGUAGE.test(item)) || !isNonEmptyString(analysis.disclaimer)) errors.push("analysis evidence or disclaimer is invalid");
+  if (!isStringArray(analysis.pendingEvidence) || analysis.pendingEvidence.length > 5 || analysis.pendingEvidence.some((item) => !isNonEmptyString(item)) || !isNonEmptyString(analysis.disclaimer)) {
+    errors.push("analysis evidence or disclaimer is invalid");
+  } else if (analysis.pendingEvidence.some((item) => INTERNAL_PRODUCT_LANGUAGE.test(item) || INTERNAL_PENDING_LANGUAGE.test(item))) {
+    errors.push("analysis.pendingEvidence contains internal product language");
+  }
 }
 
 export function validateAIAnalysisResponse(

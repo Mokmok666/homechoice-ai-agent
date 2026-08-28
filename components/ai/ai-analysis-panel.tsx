@@ -5,7 +5,7 @@ import { AlertTriangle, Check, LoaderCircle, RefreshCcw, Sparkles } from "lucide
 import { Button } from "@/components/ui/button";
 import { StructuredNarrative } from "@/components/ai/structured-narrative";
 import { findAIAnalysisBySignature, findLatestAIAnalysisForProperty, saveAIAnalysisRecord } from "@/lib/ai-analysis-storage";
-import { requestAIAnalysis } from "@/lib/ai/client";
+import { requestAIAnalysis, shouldApplyAIAnalysisResponse } from "@/lib/ai/client";
 import { projectAIAnalysisContext } from "@/lib/ai/input";
 import { createAIInputSignature } from "@/lib/ai/signature";
 import { RECOMMENDATION_BADGE_STYLES, RECOMMENDATION_LABELS } from "@/lib/recommendation-presentation";
@@ -27,8 +27,8 @@ interface AIAnalysisPanelProps {
 
 type PanelState =
   | { status: "idle" }
-  | { status: "loading" }
-  | { status: "stale" }
+  | { status: "loading"; analysis?: AIAnalysis }
+  | { status: "stale"; analysis: AIAnalysis }
   | { status: "success"; analysis: AIAnalysis; warning?: string }
   | { status: "error"; message: string };
 
@@ -72,21 +72,24 @@ export function AIAnalysisPanel({ properties, preferences, engine, geoEvidenceBy
     () => buildRequest(properties, preferences, engine, geoEvidenceByProperty, webEvidenceByProperty),
     [properties, preferences, engine, geoEvidenceByProperty, webEvidenceByProperty],
   );
+  const requestRef = useRef(request);
+  requestRef.current = request;
   const topPropertyId = request?.context.authoritativeTopPropertyId ?? null;
   const topCandidate = request?.context.candidates[0] ?? null;
   const requestIdentity = request?.inputSignature ?? "none";
 
   useEffect(() => {
+    const currentRequest = requestRef.current;
     generationRef.current += 1;
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     isGeneratingRef.current = false;
-    if (!request || !topPropertyId) { setState({ status: "idle" }); return; }
-    const cached = findAIAnalysisBySignature(topPropertyId, request.inputSignature, engine.engineVersion);
+    if (!currentRequest || !topPropertyId) { setState({ status: "idle" }); return; }
+    const cached = findAIAnalysisBySignature(topPropertyId, currentRequest.inputSignature, engine.engineVersion);
     if (cached) { setState({ status: "success", analysis: cached.analysis }); return; }
     const previous = findLatestAIAnalysisForProperty(topPropertyId);
-    setState(previous ? { status: "stale" } : { status: "idle" });
-  }, [engine.engineVersion, request, requestIdentity, topPropertyId]);
+    setState(previous ? { status: "stale", analysis: previous.analysis } : { status: "idle" });
+  }, [engine.engineVersion, requestIdentity, topPropertyId]);
 
   useEffect(() => () => abortControllerRef.current?.abort(), []);
 
@@ -103,20 +106,31 @@ export function AIAnalysisPanel({ properties, preferences, engine, geoEvidenceBy
     generationRef.current = generation;
     const controller = new AbortController();
     abortControllerRef.current = controller;
-    setState({ status: "loading" });
+    const analysisWhileLoading = state.status === "success" || state.status === "stale" || state.status === "loading"
+      ? state.analysis
+      : findLatestAIAnalysisForProperty(topPropertyId)?.analysis;
+    setState({ status: "loading", analysis: analysisWhileLoading });
 
     try {
       const response = await requestAIAnalysis(request, { signal: controller.signal });
-      if (controller.signal.aborted || generationRef.current !== generation) return;
-      if (!response.ok || response.metadata.inputSignature !== request.inputSignature || response.analysis.topPropertyId !== topPropertyId) {
+      if (!shouldApplyAIAnalysisResponse({
+        aborted: controller.signal.aborted,
+        generation,
+        currentGeneration: generationRef.current,
+        response,
+        inputSignature: request.inputSignature,
+        topPropertyId,
+      })) {
+        if (controller.signal.aborted || generationRef.current !== generation) return;
         const previous = findLatestAIAnalysisForProperty(topPropertyId);
         if (previous) {
-          setState({ status: "success", analysis: previous.analysis, warning: "最新生成失败，当前显示上一次有效解读。" });
+          setState({ status: "success", analysis: previous.analysis, warning: "暂时无法更新解读，当前仍显示上一次有效结果。" });
         } else {
-          setState({ status: "error", message: response.ok ? "AI 解读与当前房源比较结果不匹配。" : response.error.message });
+          setState({ status: "error", message: "AI解读暂时不可用，当前评分和排序结果仍然有效。" });
         }
         return;
       }
+      if (!response.ok) return;
       saveAIAnalysisRecord({
         propertyId: topPropertyId,
         inputSignature: request.inputSignature,
@@ -135,6 +149,9 @@ export function AIAnalysisPanel({ properties, preferences, engine, geoEvidenceBy
 
   const isLoading = state.status === "loading";
   const buttonLabel = getAIButtonLabel(state);
+  const visibleAnalysis = state.status === "success" || state.status === "stale" || state.status === "loading"
+    ? state.analysis
+    : undefined;
 
   return (
     <section className="card mt-7 overflow-hidden" aria-live="polite">
@@ -156,28 +173,31 @@ export function AIAnalysisPanel({ properties, preferences, engine, geoEvidenceBy
       </div>
 
       {state.status === "idle" && <div className="p-6 text-[15px] leading-7 text-[#747772] sm:p-7">AI 将结合购房偏好、全部候选、15维结果以及当前高德地图与通勤证据，解释现有阶段性排序。</div>}
-      {state.status === "stale" && <div className="flex items-start gap-3 p-6 text-[15px] leading-6 text-[#78684a] sm:p-7"><AlertTriangle className="mt-0.5 shrink-0" size={19} /><p className="font-medium">当前解读基于之前的房源或偏好信息，更新后可获得最新判断。</p></div>}
       {state.status === "loading" && (
         <div className="p-6 sm:p-7"><div className="mx-auto max-w-xl rounded-2xl border border-[#e4e8e0] bg-[#f8faf6] p-5 sm:p-6">
           <div className="flex items-center gap-3 text-[#5f7258]"><LoaderCircle className="animate-spin" size={20} /><p className="font-medium">正在生成AI购房解读</p></div>
           <ul className="mt-5 space-y-3 text-sm text-[#6c7169]">
-            <LoadingStep complete text="已读取房源与购房偏好" />
-            <LoadingStep complete text="已结合15维排序结果" />
-            <LoadingStep complete text="已读取地图与通勤证据" />
-            <LoadingStep text="正在生成比较结论" />
+            <LoadingStep complete text="已整理房源与购房偏好" />
+            <LoadingStep complete text="已核对15维分析结果" />
+            <LoadingStep complete text="已整合通勤与配套证据" />
+            <LoadingStep text="正在生成购房解读" />
           </ul>
-          <p className="mt-5 text-[13px] leading-5 text-[#8a8f87]">通常需要 15–30 秒，请保持页面开启。</p>
+          <p className="mt-5 text-[13px] leading-5 text-[#8a8f87]">生成可能需要一些时间，请保持页面开启。</p>
         </div></div>
       )}
-      {state.status === "error" && <div className="flex items-start gap-3 p-6 text-[15px] leading-6 text-[#78684a] sm:p-7"><AlertTriangle className="mt-0.5 shrink-0" size={19} /><div><p className="font-medium">AI分析暂时不可用，当前评分结果仍然有效</p><p className="mt-1 text-[13px] text-[#8a806e]">{state.message}</p></div></div>}
-      {state.status === "success" && topCandidate && (
+      {state.status === "error" && <div className="flex items-start gap-3 p-6 text-[15px] leading-6 text-[#78684a] sm:p-7"><AlertTriangle className="mt-0.5 shrink-0" size={19} /><p className="font-medium">{state.message}</p></div>}
+      {visibleAnalysis && topCandidate && (
         <AnalysisContent
-          analysis={state.analysis}
+          analysis={visibleAnalysis}
           deterministicTopName={topCandidate.property.name ?? "当前首选房源"}
           matchScore={topCandidate.decision.matchScore}
           recommendation={topCandidate.decision.recommendation}
           topPriorities={request?.context.preferences.topPriorities ?? preferences.topPriorities}
-          warning={state.warning}
+          warning={state.status === "stale"
+            ? "当前解读基于之前的房源或偏好信息，更新后可获得最新判断。"
+            : state.status === "loading"
+              ? "正在更新解读，当前仍显示上一次有效结果。"
+              : state.status === "success" ? state.warning : undefined}
         />
       )}
     </section>

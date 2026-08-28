@@ -7,6 +7,28 @@ export interface AIAnalysisClientOptions {
 
 const inFlightRequests = new Map<string, Promise<AIAnalysisResponse>>();
 
+export function shouldApplyAIAnalysisResponse({
+  aborted,
+  generation,
+  currentGeneration,
+  response,
+  inputSignature,
+  topPropertyId,
+}: {
+  aborted: boolean;
+  generation: number;
+  currentGeneration: number;
+  response: AIAnalysisResponse;
+  inputSignature: string;
+  topPropertyId: string;
+}): boolean {
+  return !aborted
+    && generation === currentGeneration
+    && response.ok
+    && response.metadata.inputSignature === inputSignature
+    && response.analysis.topPropertyId === topPropertyId;
+}
+
 async function performAIAnalysisRequest(
   request: AIAnalysisRequest,
   options: AIAnalysisClientOptions = {},

@@ -2,7 +2,13 @@ import type { AIAnalysisErrorCode } from "../../types/ai-analysis";
 
 const ZHIPU_CHAT_COMPLETIONS_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
 const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_TEMPERATURE = 0.2;
 export const DEFAULT_ZHIPU_MODEL = "glm-4-flash";
+export const AI_NARRATIVE_TEMPERATURE = 0.1;
+
+interface GenerateAIAnalysisOptions {
+  temperature?: number;
+}
 
 type ZhipuClientErrorCode = Extract<
   AIAnalysisErrorCode,
@@ -40,7 +46,10 @@ function isAbortError(error: unknown): boolean {
  * Server-only provider boundary. Never import this module from a Client Component.
  * ZHIPU_API_KEY is read at request time and is only sent in the provider Authorization header.
  */
-export async function generateAIAnalysis(prompt: string): Promise<string> {
+export async function generateAIAnalysis(
+  prompt: string,
+  options: GenerateAIAnalysisOptions = {},
+): Promise<string> {
   const apiKey = process.env.ZHIPU_API_KEY?.trim();
   if (!apiKey) {
     throw new ZhipuClientError(
@@ -65,7 +74,7 @@ export async function generateAIAnalysis(prompt: string): Promise<string> {
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
         stream: false,
-        temperature: 0.2,
+        temperature: options.temperature ?? DEFAULT_TEMPERATURE,
       }),
       cache: "no-store",
       signal: controller.signal,

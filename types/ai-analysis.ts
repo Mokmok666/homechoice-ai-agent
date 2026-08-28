@@ -204,6 +204,43 @@ export interface AIAnalysisRequest {
   inputSignature: string;
   context: AIAnalysisContext;
 }
+
+export interface AINarrativeFact {
+  kind: string;
+  subjectId: string;
+  subjectName: string;
+  dimension: DimensionKey | null;
+  values: Record<string, string | number | null>;
+  allowedMeaning: string;
+}
+
+export interface AINarrativeComparisonFact extends AINarrativeFact {
+  alternativeId: string;
+  alternativeName: string;
+  relationMeaning: "首选相对更符合该项" | "主要备选相对更符合该项" | "两者表现相当" | "两者表现接近" | "当前信息不足以比较" | "主要备选数值更优，但首选仍满足目标";
+}
+
+export interface AINarrativeGuard {
+  dimension: DimensionKey | null;
+  guidance: string;
+}
+
+export interface AINarrativeFacts {
+  topCandidate: {
+    id: string;
+    name: string;
+    rank: 1;
+    recommendation: Recommendation;
+    matchScore: number | null;
+  };
+  candidateOrder: Array<{ id: string; name: string; rank: number }>;
+  userPriorities: Array<{ dimension: DecisionPriority; label: string; rank: number }>;
+  requiredFacts: AINarrativeFact[];
+  comparisonFacts: AINarrativeComparisonFact[];
+  uncertaintyFacts: AINarrativeFact[];
+  nextStepFacts: AINarrativeFact[];
+  prohibitedClaims: AINarrativeGuard[];
+}
 export interface AIAnalysis {
   topPropertyId: string;
   topPropertyName: string;

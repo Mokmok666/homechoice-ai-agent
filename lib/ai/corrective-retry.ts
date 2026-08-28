@@ -3,7 +3,7 @@ import type { ValidationResult } from "./validation";
 export type AIAnalysisAttemptEvent =
   | { attempt: 1 | 2; outcome: "success" }
   | { attempt: 1 | 2; outcome: "parse_failed" }
-  | { attempt: 1 | 2; outcome: "validation_failed"; issueCount: number };
+  | { attempt: 1 | 2; outcome: "validation_failed"; issueCount: number; retryable: boolean };
 
 export type ValidationAwareGenerationResult<T> =
   | { success: true; data: T; attempts: 1 | 2 }
@@ -19,9 +19,22 @@ interface ValidationAwareGenerationOptions<T> {
   onAttempt?: (event: AIAnalysisAttemptEvent) => void;
 }
 
+export type SingleRequestGenerationResult<T> = {
+  data: T;
+  source: "model" | "deterministic_fallback";
+  providerCalls: 1 | 2;
+  fallbackReason?: "parse_failed" | "validation_exhausted" | "provider_error";
+};
+
+interface SingleRequestGenerationOptions<T> extends ValidationAwareGenerationOptions<T> {
+  buildFallback: () => T;
+  onProviderError?: (error: unknown) => void;
+}
+
 export function shouldRetryAIAnalysisValidation(issues: string[]): boolean {
   return issues.length > 0 && issues.every((issue) => {
     if (issue === "analysis must omit education when educationNeed is none") return true;
+    if (issue === "analysis.pendingEvidence contains internal product language") return true;
     return issue.startsWith("analysis.decisionSummary ")
       && issue !== "analysis.decisionSummary must be a non-empty string";
   });
@@ -55,13 +68,15 @@ export async function runValidationAwareGeneration<T>({
       return { success: true, data: validation.data, attempts: attempt };
     }
 
+    const retryable = attempt === 1 && shouldRetry(validation.errors);
     onAttempt?.({
       attempt,
       outcome: "validation_failed",
       issueCount: validation.errors.length,
+      retryable,
     });
 
-    if (attempt === 2 || !shouldRetry(validation.errors)) {
+    if (!retryable) {
       return {
         success: false,
         reason: "validation_failed",
@@ -74,4 +89,41 @@ export async function runValidationAwareGeneration<T>({
   }
 
   throw new Error("AI validation-aware generation exhausted unexpectedly.");
+}
+
+/** One frontend request resolves to either a validated model result or a local safe fallback. */
+export async function runSingleRequestGeneration<T>({
+  buildFallback,
+  onProviderError,
+  ...generationOptions
+}: SingleRequestGenerationOptions<T>): Promise<SingleRequestGenerationResult<T>> {
+  let providerCalls = 0;
+  let generation: ValidationAwareGenerationResult<T>;
+  try {
+    generation = await runValidationAwareGeneration({
+      ...generationOptions,
+      generate: async (prompt) => {
+        providerCalls += 1;
+        return generationOptions.generate(prompt);
+      },
+    });
+  } catch (error) {
+    onProviderError?.(error);
+    return {
+      data: buildFallback(),
+      source: "deterministic_fallback",
+      providerCalls: Math.max(1, Math.min(providerCalls, 2)) as 1 | 2,
+      fallbackReason: "provider_error",
+    };
+  }
+
+  if (generation.success) {
+    return { data: generation.data, source: "model", providerCalls: generation.attempts };
+  }
+  return {
+    data: buildFallback(),
+    source: "deterministic_fallback",
+    providerCalls: generation.attempts,
+    fallbackReason: generation.reason === "parse_failed" ? "parse_failed" : "validation_exhausted",
+  };
 }

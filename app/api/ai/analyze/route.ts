@@ -3,8 +3,10 @@ import {
   createAIAnalysisCorrectivePrompt,
   createAIAnalysisPrompt,
 } from "../../../../lib/ai/prompt";
+import { buildNarrativeFacts } from "../../../../lib/ai/narrative-facts";
+import { createDeterministicNarrative } from "../../../../lib/ai/deterministic-narrative";
 import {
-  runValidationAwareGeneration,
+  runSingleRequestGeneration,
   shouldRetryAIAnalysisValidation,
   type AIAnalysisAttemptEvent,
 } from "../../../../lib/ai/corrective-retry";
@@ -13,6 +15,7 @@ import {
   validateAIAnalysisResponse,
 } from "../../../../lib/ai/validation";
 import {
+  AI_NARRATIVE_TEMPERATURE,
   generateAIAnalysis,
   getZhipuModel,
   ZhipuClientError,
@@ -42,17 +45,22 @@ function errorResponse(
 
 function logAttempt(event: AIAnalysisAttemptEvent): void {
   if (event.outcome === "validation_failed") {
-    console.warn(`[AI_ANALYZE] attempt=${event.attempt} validation_failed issue_count=${event.issueCount}`);
+    if (event.attempt === 1 && !event.retryable) {
+      console.warn(`[AI_ANALYZE] mode=model attempt=1 hard_validation_failure issue_count=${event.issueCount}`);
+      return;
+    }
+    console.warn(`[AI_ANALYZE] mode=model attempt=${event.attempt} validation_failed issue_count=${event.issueCount} retryable=${event.retryable}`);
     return;
   }
   if (event.outcome === "parse_failed") {
-    console.warn(`[AI_ANALYZE] attempt=${event.attempt} parse_failed`);
+    console.warn(`[AI_ANALYZE] mode=model attempt=${event.attempt} parse_failed`);
     return;
   }
-  console.info(`[AI_ANALYZE] attempt=${event.attempt} success`);
+  console.info(`[AI_ANALYZE] mode=model attempt=${event.attempt} success`);
 }
 
 export async function POST(request: Request): Promise<NextResponse<AIAnalysisResponse>> {
+  const startedAt = Date.now();
   let body: unknown;
   try {
     body = await request.json();
@@ -70,52 +78,79 @@ export async function POST(request: Request): Promise<NextResponse<AIAnalysisRes
   }
 
   try {
-    const generation = await runValidationAwareGeneration({
-      initialPrompt: createAIAnalysisPrompt(requestValidation.data),
-      generate: generateAIAnalysis,
-      validate: (analysis) => validateAIAnalysisResponse(
-        {
-          ok: true,
-          analysis,
-          metadata: {
-            provider: "zhipu",
-            model: getZhipuModel(),
-            generatedAt: new Date().toISOString(),
-            inputSignature: requestValidation.data.inputSignature,
-          },
+    const narrativeFacts = buildNarrativeFacts(requestValidation.data);
+    const factCount = narrativeFacts.requiredFacts.length
+      + narrativeFacts.comparisonFacts.length
+      + narrativeFacts.uncertaintyFacts.length
+      + narrativeFacts.nextStepFacts.length;
+    console.info(`[AI_ANALYZE] facts_built fact_count=${factCount} comparison_count=${narrativeFacts.comparisonFacts.length} uncertainty_count=${narrativeFacts.uncertaintyFacts.length}`);
+    const validateGeneratedAnalysis = (analysis: unknown, model: string = getZhipuModel()) => validateAIAnalysisResponse(
+      {
+        ok: true,
+        analysis,
+        metadata: {
+          provider: "zhipu",
+          model,
+          generatedAt: new Date().toISOString(),
+          inputSignature: requestValidation.data.inputSignature,
         },
-        requestValidation.data.context.authoritativeTopPropertyId,
-        requestValidation.data.context.candidates[0]?.property.name ?? undefined,
-        requestValidation.data.context.candidates.slice(1, 2).flatMap((candidate) => candidate.property.name ? [candidate.property.name] : []),
-        requiresCommuteBoundaryNuance(requestValidation.data),
-        {
-          educationNeed: requestValidation.data.context.preferences.educationNeed,
-          comparisons: requestValidation.data.context.candidateComparisons,
-          topPropertyName: requestValidation.data.context.candidates[0]?.property.name ?? undefined,
-          dimensions: requestValidation.data.context.candidates[0]?.decision.dimensions.map((dimension) => ({
-            key: dimension.key,
-            label: dimension.label,
-            score: dimension.score,
-            status: dimension.status,
-          })) ?? [],
-        },
-      ),
-      createCorrectivePrompt: (issues) => createAIAnalysisCorrectivePrompt(requestValidation.data, issues),
+      },
+      requestValidation.data.context.authoritativeTopPropertyId,
+      requestValidation.data.context.candidates[0]?.property.name ?? undefined,
+      requestValidation.data.context.candidates.slice(1, 2).flatMap((candidate) => candidate.property.name ? [candidate.property.name] : []),
+      requiresCommuteBoundaryNuance(requestValidation.data),
+      {
+        educationNeed: requestValidation.data.context.preferences.educationNeed,
+        comparisons: requestValidation.data.context.candidateComparisons,
+        topPropertyName: requestValidation.data.context.candidates[0]?.property.name ?? undefined,
+        dimensions: requestValidation.data.context.candidates[0]?.decision.dimensions.map((dimension) => ({
+          key: dimension.key,
+          label: dimension.label,
+          score: dimension.score,
+          status: dimension.status,
+        })) ?? [],
+      },
+    );
+
+    const generation = await runSingleRequestGeneration({
+      initialPrompt: createAIAnalysisPrompt(requestValidation.data, narrativeFacts),
+      generate: (prompt) => generateAIAnalysis(prompt, { temperature: AI_NARRATIVE_TEMPERATURE }),
+      validate: (analysis) => validateGeneratedAnalysis(analysis),
+      createCorrectivePrompt: (issues) => createAIAnalysisCorrectivePrompt(requestValidation.data, narrativeFacts, issues),
       shouldRetry: shouldRetryAIAnalysisValidation,
       onAttempt: logAttempt,
+      buildFallback: () => {
+        const validation = validateGeneratedAnalysis(
+          createDeterministicNarrative(narrativeFacts),
+          "deterministic-narrative-v1",
+        );
+        if (!validation.success) {
+          throw new Error("Deterministic narrative did not satisfy the response contract.");
+        }
+        return validation.data;
+      },
+      onProviderError: (error) => {
+        const providerErrorType = error instanceof ZhipuClientError
+          ? error.code === "AI_TIMEOUT" ? "timeout" : error.code === "AI_NOT_CONFIGURED" ? "not_configured" : "provider"
+          : "unknown";
+        console.warn(`[AI_ANALYZE] mode=model provider_error type=${providerErrorType}`);
+      },
     });
 
-    if (generation.success) {
-      return NextResponse.json(generation.data);
+    if (generation.source === "deterministic_fallback") {
+      console.warn(`[AI_ANALYZE] mode=fallback reason=${generation.fallbackReason}`);
     }
-    if (generation.reason === "parse_failed") {
-      return errorResponse("INVALID_AI_OUTPUT", "AI 返回内容无法安全解析。", false);
-    }
-    return errorResponse("INVALID_AI_OUTPUT", "AI 返回内容未通过安全校验。", false);
+    console.info(`[AI_ANALYZE] final=success source=${generation.source === "model" ? "model" : "fallback"} duration_ms=${Date.now() - startedAt}`);
+    return NextResponse.json(generation.data);
   } catch (error) {
     if (error instanceof ZhipuClientError) {
+      const providerErrorType = error.code === "AI_TIMEOUT"
+        ? "timeout"
+        : error.code === "AI_NOT_CONFIGURED" ? "not_configured" : "provider";
+      console.warn(`[AI_ANALYZE] provider_error type=${providerErrorType}`);
       return errorResponse(error.code, error.message, error.retryable);
     }
+    console.warn("[AI_ANALYZE] provider_error type=unknown");
     return errorResponse("AI_PROVIDER_ERROR", "AI 分析服务发生未知错误。", true);
   }
 }
