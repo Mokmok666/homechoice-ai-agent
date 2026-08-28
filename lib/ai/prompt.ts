@@ -107,3 +107,23 @@ export function createAIAnalysisUserPrompt(request: AIAnalysisRequest): string {
 export function createAIAnalysisPrompt(request: AIAnalysisRequest): string {
   return [AI_ANALYSIS_SYSTEM_PROMPT, AI_ANALYSIS_OUTPUT_CONTRACT, createAIAnalysisUserPrompt(request)].join("\n\n---\n\n");
 }
+
+export function createAIAnalysisCorrectivePrompt(
+  request: AIAnalysisRequest,
+  validationIssues: string[],
+): string {
+  const issues = validationIssues
+    .map((issue) => issue.replace(/[\r\n\t]+/g, " ").trim().slice(0, 200))
+    .filter(Boolean)
+    .slice(0, 12)
+    .map((issue) => `- ${issue}`)
+    .join("\n");
+
+  return [
+    createAIAnalysisPrompt(request),
+    "上一次输出未通过 HomeChoice 的确定性一致性校验。请只修正下列问题，并重新输出完整、合法的 JSON。",
+    "Validation issues:",
+    issues || "- The response did not satisfy the required output contract.",
+    "权威输入始终优先。不得改变候选顺序、首选房源、分数、推荐、候选比较事实或证据事实；不得增加不存在的候选或字段。只返回完整的约定 JSON。",
+  ].join("\n\n---\n\n");
+}
