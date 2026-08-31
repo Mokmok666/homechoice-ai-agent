@@ -35,8 +35,14 @@ export function shouldRetryAIAnalysisValidation(issues: string[]): boolean {
   return issues.length > 0 && issues.every((issue) => {
     if (issue === "analysis must omit education when educationNeed is none") return true;
     if (issue === "analysis.pendingEvidence contains internal product language") return true;
-    return issue.startsWith("analysis.decisionSummary ")
-      && issue !== "analysis.decisionSummary must be a non-empty string";
+    if (issue === "analysis must reference the authoritative alternative") return true;
+    if (issue === "analysis evidence or disclaimer is invalid") return false;
+    return issue.startsWith("analysis")
+      && issue !== "analysis must be an object"
+      && issue !== "analysis contains unexpected fields"
+      && issue !== "analysis must not contain scores, ranking, recommendation or weights"
+      && !issue.startsWith("analysis.topPropertyId")
+      && !issue.startsWith("analysis.topPropertyName");
   });
 }
 

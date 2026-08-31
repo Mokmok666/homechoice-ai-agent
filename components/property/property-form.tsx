@@ -13,13 +13,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { LocationConfirmation } from "@/components/property/location-confirmation";
 import { isDemoModeActive } from "@/lib/demo/demo-mode";
 import { createPersistedProperty, loadProperty, updatePersistedProperty } from "@/lib/property-storage";
 import { useSupabaseAuth } from "@/components/providers/supabase-auth-provider";
-import type { ComparableTransaction, ConfirmedPropertyLocation, FloorLevel, Orientation, PropertyInput } from "@/types/property";
+import type { ComparableTransaction, ConfirmedPropertyLocation, FloorLevel, NoiseExperienceLevel, Orientation, PropertyInput, SubjectiveQualityLevel } from "@/types/property";
 
 const LAYOUT_OPTIONS = [
   "1室1厅1卫",
@@ -70,6 +70,15 @@ const PROPERTY_MANAGEMENT_OPTIONS = [
   "雅生活",
 ] as const;
 
+const QUALITY_OPTIONS: Array<{ value: SubjectiveQualityLevel; label: string }> = [
+  { value: "unknown", label: "暂未判断" }, { value: "very_poor", label: "很差" }, { value: "poor", label: "较差" },
+  { value: "average", label: "一般" }, { value: "good", label: "较好" }, { value: "very_good", label: "很好" },
+];
+const NOISE_OPTIONS: Array<{ value: NoiseExperienceLevel; label: string }> = [
+  { value: "unknown", label: "暂未判断" }, { value: "severe", label: "严重" }, { value: "noticeable", label: "明显" },
+  { value: "occasional", label: "偶尔" }, { value: "low", label: "较少" }, { value: "minimal", label: "很少" },
+];
+
 const SELECT_CLASS = "mt-2 h-12 w-full rounded-lg border border-[#deddd8] bg-white px-4 text-[15px] outline-none focus:border-[#7d8f75] focus:ring-2 focus:ring-[#7d8f75]/10";
 
 interface ComparableFormRow {
@@ -97,6 +106,14 @@ interface PropertyFormState {
   schoolInformation: string;
   propertyManagementInformation: string;
   propertyFee: string;
+  greenRatio: string;
+  parkingRatio: string;
+  propertyManagementExperience: string;
+  publicAreaMaintenance: string;
+  communityEnvironmentExperience: string;
+  noiseExperience: string;
+  parkingExperience: string;
+  maintenanceCondition: string;
   propertyExperience: string;
   environment: string;
   noise: string;
@@ -131,6 +148,14 @@ const EMPTY_FORM: PropertyFormState = {
   schoolInformation: "",
   propertyManagementInformation: "",
   propertyFee: "",
+  greenRatio: "",
+  parkingRatio: "",
+  propertyManagementExperience: "unknown",
+  publicAreaMaintenance: "unknown",
+  communityEnvironmentExperience: "unknown",
+  noiseExperience: "unknown",
+  parkingExperience: "unknown",
+  maintenanceCondition: "unknown",
   propertyExperience: "",
   environment: "",
   noise: "",
@@ -207,6 +232,14 @@ function validateForm(form: PropertyFormState): FormErrors {
     const propertyFee = Number(form.propertyFee);
     if (!Number.isFinite(propertyFee) || propertyFee <= 0) errors.propertyFee = "物业费必须是大于 0 的数字。";
   }
+  if (form.greenRatio.trim()) {
+    const greenRatio = Number(form.greenRatio);
+    if (!Number.isFinite(greenRatio) || greenRatio < 0 || greenRatio > 100) errors.greenRatio = "绿化率必须是 0–100 之间的数字。";
+  }
+  if (form.parkingRatio.trim()) {
+    const parkingRatio = Number(form.parkingRatio);
+    if (!Number.isFinite(parkingRatio) || parkingRatio < 0) errors.parkingRatio = "车位配比不能小于 0。";
+  }
   if (form.recentDealPrice.trim()) {
     const recentDealPrice = Number(form.recentDealPrice);
     if (!Number.isFinite(recentDealPrice) || recentDealPrice <= 0) errors.recentDealPrice = "成交价格线索必须是大于 0 的数字。";
@@ -240,6 +273,16 @@ function validateForm(form: PropertyFormState): FormErrors {
 function FieldError({ id, message }: { id: string; message?: string }) {
   if (!message) return null;
   return <p id={id} className="mt-2 text-xs text-[#a34f43]" role="alert">{message}</p>;
+}
+
+function ObservationSelect({ id, label, value, options, onChange }: {
+  id: string;
+  label: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+}) {
+  return <div><Label htmlFor={id}>{label}</Label><select id={id} className={SELECT_CLASS} value={value} onChange={(event) => onChange(event.target.value)}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div>;
 }
 
 export function PropertyForm() {
@@ -292,6 +335,14 @@ export function PropertyForm() {
       schoolInformation: property.schoolInformation,
       propertyManagementInformation: property.propertyCompany ?? property.propertyManagementInformation,
       propertyFee: property.propertyFee === null || property.propertyFee === undefined ? "" : String(property.propertyFee),
+      greenRatio: property.greenRatio === null || property.greenRatio === undefined ? "" : String(property.greenRatio),
+      parkingRatio: property.parkingRatio === null || property.parkingRatio === undefined ? "" : String(property.parkingRatio),
+      propertyManagementExperience: property.propertyManagementExperience ?? "unknown",
+      publicAreaMaintenance: property.publicAreaMaintenance ?? "unknown",
+      communityEnvironmentExperience: property.communityEnvironmentExperience ?? "unknown",
+      noiseExperience: property.noiseExperience ?? "unknown",
+      parkingExperience: property.parkingExperience ?? "unknown",
+      maintenanceCondition: property.maintenanceCondition ?? "unknown",
       propertyExperience: property.propertyExperience ?? "",
       environment: property.environment ?? "",
       noise: property.noise ?? "",
@@ -408,6 +459,14 @@ export function PropertyForm() {
       propertyManagementInformation: form.propertyManagementInformation.trim(),
       propertyCompany: form.propertyManagementInformation.trim() || null,
       propertyFee: form.propertyFee.trim() ? Number(form.propertyFee) : null,
+      greenRatio: form.greenRatio.trim() ? Number(form.greenRatio) : null,
+      parkingRatio: form.parkingRatio.trim() ? Number(form.parkingRatio) : null,
+      propertyManagementExperience: form.propertyManagementExperience as SubjectiveQualityLevel,
+      publicAreaMaintenance: form.publicAreaMaintenance as SubjectiveQualityLevel,
+      communityEnvironmentExperience: form.communityEnvironmentExperience as SubjectiveQualityLevel,
+      noiseExperience: form.noiseExperience as NoiseExperienceLevel,
+      parkingExperience: form.parkingExperience as SubjectiveQualityLevel,
+      maintenanceCondition: form.maintenanceCondition as SubjectiveQualityLevel,
       propertyExperience: form.propertyExperience.trim() || null,
       environment: form.environment.trim() || null,
       noise: form.noise.trim() || null,
@@ -554,7 +613,7 @@ export function PropertyForm() {
       <Card id="supplemental-information">
         <CardHeader className="border-b border-[#eceae5] px-6 py-5 sm:px-8">
           <CardTitle>补充分析信息</CardTitle>
-          <CardDescription>全部选填。仅记录客观事实；信息不足会降低覆盖率，不会被自动记为低分。</CardDescription>
+          <CardDescription>全部选填。客观数值保持原始事实，现场体验会明确标记为用户观察；信息不足不会被自动记为低分。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6 px-6 py-6 sm:px-8">
           <div className="grid gap-6 sm:grid-cols-2">
@@ -584,18 +643,15 @@ export function PropertyForm() {
                 <Input id="propertyFee" className="mt-2" type="number" min="0" step="0.01" inputMode="decimal" value={form.propertyFee} onChange={(event) => updateField("propertyFee", event.target.value)} placeholder="例如：3.8" {...inputErrorProps("propertyFee")} />
                 <FieldError id="propertyFee-error" message={errors.propertyFee} />
               </div>
-              <div className="sm:col-span-2"><Label htmlFor="propertyExperience">物业服务体验</Label><Textarea id="propertyExperience" className="mt-2" value={form.propertyExperience} onChange={(event) => updateField("propertyExperience", event.target.value)} placeholder="例如：门岗响应及时，报修效率仍需继续观察" /></div>
-              <div id="community-quality" className="scroll-mt-24 rounded-lg target:ring-2 target:ring-[#aebda8] target:ring-offset-4"><Label htmlFor="environment">小区环境</Label><Textarea id="environment" className="mt-2" value={form.environment} onChange={(event) => updateField("environment", event.target.value)} placeholder="记录绿化、采光、卫生等现场观察" /></div>
-              <div><Label htmlFor="noise">噪音情况</Label><Textarea id="noise" className="mt-2" value={form.noise} onChange={(event) => updateField("noise", event.target.value)} placeholder="记录道路、商业或邻里噪音" /></div>
-              <div><Label htmlFor="parking">停车情况</Label><Textarea id="parking" className="mt-2" value={form.parking} onChange={(event) => updateField("parking", event.target.value)} placeholder="记录车位、停车费或出入体验" /></div>
-              <div><Label htmlFor="publicArea">公共区域</Label><Textarea id="publicArea" className="mt-2" value={form.publicArea} onChange={(event) => updateField("publicArea", event.target.value)} placeholder="记录大堂、电梯、走廊和设施维护" /></div>
+              <div><Label htmlFor="greenRatio">绿化率（%）</Label><Input id="greenRatio" className="mt-2" type="number" min="0" max="100" step="0.1" inputMode="decimal" value={form.greenRatio} onChange={(event) => updateField("greenRatio", event.target.value)} placeholder="例如：30" {...inputErrorProps("greenRatio")} /><FieldError id="greenRatio-error" message={errors.greenRatio} /></div>
+              <div><Label htmlFor="parkingRatio">车位配比（车位/户）</Label><Input id="parkingRatio" className="mt-2" type="number" min="0" step="0.01" inputMode="decimal" value={form.parkingRatio} onChange={(event) => updateField("parkingRatio", event.target.value)} placeholder="例如：1.1" {...inputErrorProps("parkingRatio")} /><FieldError id="parkingRatio-error" message={errors.parkingRatio} /></div>
+              <ObservationSelect id="propertyManagementExperience" label="物业服务体验" value={form.propertyManagementExperience} options={QUALITY_OPTIONS} onChange={(value) => updateField("propertyManagementExperience", value)} />
+              <ObservationSelect id="publicAreaMaintenance" label="公共区域维护" value={form.publicAreaMaintenance} options={QUALITY_OPTIONS} onChange={(value) => updateField("publicAreaMaintenance", value)} />
+              <ObservationSelect id="communityEnvironmentExperience" label="小区环境体验" value={form.communityEnvironmentExperience} options={QUALITY_OPTIONS} onChange={(value) => updateField("communityEnvironmentExperience", value)} />
+              <ObservationSelect id="noiseExperience" label="噪音影响" value={form.noiseExperience} options={NOISE_OPTIONS} onChange={(value) => updateField("noiseExperience", value)} />
+              <ObservationSelect id="parkingExperience" label="停车体验" value={form.parkingExperience} options={QUALITY_OPTIONS} onChange={(value) => updateField("parkingExperience", value)} />
+              <ObservationSelect id="maintenanceCondition" label="整体维护状况" value={form.maintenanceCondition} options={QUALITY_OPTIONS} onChange={(value) => updateField("maintenanceCondition", value)} />
             </div>
-          </div>
-
-          <div id="actual-commute-experience" className="scroll-mt-24 rounded-xl border-t border-[#eceae5] pt-6 target:ring-2 target:ring-[#aebda8] target:ring-offset-4">
-            <Label htmlFor="actualCommuteExperience">实际通勤体验</Label>
-            <Textarea id="actualCommuteExperience" className="mt-2" value={form.actualCommuteExperience} onChange={(event) => updateField("actualCommuteExperience", event.target.value)} placeholder="例如：工作日早高峰实测约45分钟，晚高峰约50分钟" />
-            <p className="mt-2 text-sm leading-6 text-[#777a74]">仅作为你的实测记录和后续解读依据，不会覆盖高德路线或自动改变通勤评分。</p>
           </div>
 
           <div id="transaction-references" className="scroll-mt-24 rounded-xl border-t border-[#eceae5] pt-6 target:ring-2 target:ring-[#aebda8] target:ring-offset-4">

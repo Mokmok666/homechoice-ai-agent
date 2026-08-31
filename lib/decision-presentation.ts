@@ -71,20 +71,37 @@ export function buildDecisionRisks(input: {
   const education = dimension(input.result, "education");
   const commercial = dimension(input.result, "commercial_amenities");
   const medical = dimension(input.result, "medical_amenities");
-  const hasPropertyExperience = validateTextField(input.property.propertyExperience).status === "valid";
+  const hasPropertyExperience = input.property.propertyManagementExperience !== undefined && input.property.propertyManagementExperience !== "unknown"
+    || validateTextField(input.property.propertyExperience).status === "valid";
   const hasActualCommuteExperience = validateTextField(input.property.actualCommuteExperience).status === "valid";
   const communityChecks = [
-    [input.property.environment, "查看绿化、卫生和采光"],
-    [input.property.noise, "在不同时段确认噪音"],
-    [input.property.parking, "核实车位和停车费用"],
-    [input.property.publicArea, "查看大堂、电梯和走廊维护"],
+    [input.property.communityEnvironmentExperience !== undefined && input.property.communityEnvironmentExperience !== "unknown" || validateTextField(input.property.environment).status === "valid", "查看绿化、卫生和采光"],
+    [input.property.noiseExperience !== undefined && input.property.noiseExperience !== "unknown" || validateTextField(input.property.noise).status === "valid", "在不同时段确认噪音"],
+    [input.property.parkingExperience !== undefined && input.property.parkingExperience !== "unknown" || validateTextField(input.property.parking).status === "valid", "核实车位和停车费用"],
+    [input.property.publicAreaMaintenance !== undefined && input.property.publicAreaMaintenance !== "unknown" || validateTextField(input.property.publicArea).status === "valid", "查看大堂、电梯和走廊维护"],
   ] as const;
-  const missingCommunityChecks = communityChecks.filter(([value]) => validateTextField(value).status !== "valid").map(([, suggestion]) => suggestion);
+  const missingCommunityChecks = communityChecks.filter(([available]) => !available).map(([, suggestion]) => suggestion);
 
   for (const priority of [...input.preferences.topPriorities, "property_management", "price", "community_quality", "commute", "education"] as DecisionPriority[]) {
     if (priority === "price" && transaction?.score === null) add("真实成交价", input.property.recentDealPrice ? `已记录 ${input.property.recentDealPrice} 万元成交价格线索，但近期同户型可比成交样本仍不足，当前预期成交价尚需核验。` : `近期同户型可比成交样本不足，${input.property.totalPrice} 万元仍属于预期成交假设。`, ["向中介或业主索取同户型成交记录", "核对成交日期、面积和可靠来源"], "transaction-references");
-    if (priority === "property_management" && management?.status !== "known" && !hasPropertyExperience) add("物业实际服务", webConclusion(input.webEvidenceByProperty, input.property.id, "property_management") ?? "目前只能确认管理主体，缺少该小区真实服务体验。", ["确认物业费和其他固定费用", "询问住户报修、门岗和保洁体验"], "property-service");
-    if (priority === "community_quality" && community?.status !== "known" && missingCommunityChecks.length > 0) add("小区实际品质", webConclusion(input.webEvidenceByProperty, input.property.id, "community_quality") ?? "公开资料尚不足以替代现场看房和长期住户体验。", missingCommunityChecks.slice(0, 3), "community-quality");
+    if (priority === "property_management" && management?.status !== "known") add(
+      "物业实际服务",
+      webConclusion(input.webEvidenceByProperty, input.property.id, "property_management")
+        ?? (hasPropertyExperience
+          ? "已有你的现场体验记录，但仍缺少足够的项目级服务与长期住户反馈来形成完整判断。"
+          : "目前只能确认管理主体，缺少该小区真实服务体验。"),
+      ["确认物业费和其他固定费用", "询问住户报修、门岗和保洁体验"],
+      "property-service",
+    );
+    if (priority === "community_quality" && community?.status !== "known") add(
+      "小区实际品质",
+      webConclusion(input.webEvidenceByProperty, input.property.id, "community_quality")
+        ?? (missingCommunityChecks.length > 0
+          ? "公开资料尚不足以替代现场看房和长期住户体验。"
+          : "已有你的现场观察记录，但仍缺少足够的项目级与长期居住证据来确认整体小区品质。"),
+      (missingCommunityChecks.length > 0 ? missingCommunityChecks : ["向长期住户核实持续维护与居住体验"]).slice(0, 3),
+      "community-quality",
+    );
     if (priority === "commute" && (!commute?.primary || commute.primary.status === "unavailable") && !hasActualCommuteExperience) add("实际通勤体验", "当前缺少稳定路线证据，建议在常用时段实地确认门到门通勤体验。", ["在工作日常用时段实测路线", "记录门到门耗时和换乘等待"], "actual-commute-experience");
     if (priority === "education" && input.preferences.educationNeed !== "none" && education?.status !== "known") add("教育资格", "当前信息不能证明具体入学资格，仍需以最新官方政策和实际资格核验为准。", ["核对当年招生范围", "向主管部门确认家庭资格条件"], "school-information");
     if (priority === "commercial_amenities" && (!commercial || commercial.status === "unknown")) add("大型商业可达性", "当前缺少可用的大型商场、购物中心或商业综合体证据，尚无法判断集中商业是否便利。", ["实地确认常用大型商业体", "核对商业体当前运营状态"]);

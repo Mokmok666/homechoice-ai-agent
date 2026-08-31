@@ -3,6 +3,7 @@ import { projectWebEvidencePropertyIdentity } from "./query-builder";
 import { applyWebEvidenceInterpretation, hasCurrentWebEvidenceInterpretation } from "./interpretation";
 import { createWebEvidenceInterpretationSignature } from "./interpretation-signature";
 import type { Property } from "@/types/property";
+import type { BuyerPreferences } from "@/types/buyer-preferences";
 import {
   WEB_EVIDENCE_PROVIDER_ID,
   type PropertyWebEvidence,
@@ -29,7 +30,7 @@ function waitForSharedRequest<T>(request: Promise<T>, signal?: AbortSignal): Pro
   });
 }
 
-async function requestEvidence(property: Property, signal?: AbortSignal): Promise<PropertyWebEvidence | null> {
+async function requestEvidence(property: Property, topPriorities: BuyerPreferences["topPriorities"], signal?: AbortSignal): Promise<PropertyWebEvidence | null> {
   const identity = projectWebEvidencePropertyIdentity(property);
   const signature = `${identity.propertyId}:${identity.poiId ?? `${identity.lng ?? ""},${identity.lat ?? ""}`}:${identity.name}:${identity.city}:${identity.district}`;
   const existing = inFlight.get(signature);
@@ -38,7 +39,7 @@ async function requestEvidence(property: Property, signal?: AbortSignal): Promis
     const response = await fetch("/api/web-evidence/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ property: identity }),
+      body: JSON.stringify({ property: identity, topPriorities }),
     });
     const payload = await response.json() as WebEvidenceApiResponse;
     if (!payload.ok) {
@@ -70,6 +71,7 @@ async function requestInterpretation(property: Property, evidence: PropertyWebEv
 
 export async function refreshWebEvidenceForProperties(
   properties: Property[],
+  preferences: BuyerPreferences,
   onPropertyEvidence?: (propertyId: string, evidence: PropertyWebEvidence) => void,
   signal?: AbortSignal,
 ): Promise<WebEvidenceByProperty> {
@@ -82,7 +84,7 @@ export async function refreshWebEvidenceForProperties(
       const cached = loadCachedPropertyWebEvidence(property);
       let evidence = cached.evidence?.providerId === WEB_EVIDENCE_PROVIDER_ID ? cached.evidence : undefined;
       if (cached.stale) try {
-        const refreshedEvidence = await requestEvidence(property, signal);
+        const refreshedEvidence = await requestEvidence(property, preferences.topPriorities, signal);
         if (signal?.aborted) throw abortError();
         if (refreshedEvidence) {
           const newCoverage = refreshedEvidence.dimensions.filter((item) => item.status !== "unavailable" && item.facts.length > 0).length;

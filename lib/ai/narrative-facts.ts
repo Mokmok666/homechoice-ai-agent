@@ -42,7 +42,7 @@ const NEXT_STEP_BY_DIMENSION: Partial<Record<DimensionKey, string>> = {
   commute: "在工作日通勤高峰实测本人及伴侣的实际通勤时间",
   community_quality: "实地查看小区公共区域、维护状态、噪音和停车情况",
   property_management: "向在住业主确认物业响应、公共区域维护和收费情况",
-  transaction_price_reasonableness: "补充近24个月同小区、相近面积户型的真实成交记录",
+  transaction_price_reasonableness: "补充近期同小区、相近面积户型的真实成交记录",
   layout_design: "实地确认采光、动线和实际空间利用情况",
   space_match: "结合家庭成员和房间用途实地核对空间是否够用",
   liquidity: "核实近期真实挂牌周期与成交记录",

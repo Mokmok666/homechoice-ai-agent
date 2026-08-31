@@ -11,9 +11,10 @@ import { createDecisionPropertyView, getInvalidPropertyInputFields } from "./dat
 import { buildEvidenceItems } from "./evidence";
 import { evaluateDimensions } from "./scorers";
 import { makeRecommendation } from "./recommendation";
-import { calculateWeights } from "./weights";
+import { calculateEffectiveWeights, calculateWeights } from "./weights";
+import { DIMENSION_KEYS, type DimensionKey } from "../../types/decision";
 
-export const DECISION_ENGINE_VERSION = "decision-engine-v2.1" as const;
+export const DECISION_ENGINE_VERSION = "decision-engine-v2.3" as const;
 
 function assertValidInput(properties: Property[], preferences: BuyerPreferences, asOfDate: string): void {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(asOfDate) || !Number.isFinite(Date.parse(`${asOfDate}T00:00:00Z`))) {
@@ -33,21 +34,24 @@ function assertValidInput(properties: Property[], preferences: BuyerPreferences,
 }
 
 function calculateOverallScore(dimensions: DimensionEvaluation[]): number | null {
-  const scored = dimensions.filter((dimension) => dimension.score !== null);
-  const weight = scored.reduce((sum, dimension) => sum + dimension.finalWeight, 0);
-  if (weight === 0) return null;
-  const weightedScore = scored.reduce(
-    (sum, dimension) => sum + (dimension.score ?? 0) * dimension.finalWeight,
-    0,
-  );
-  return Math.round(weightedScore / weight);
+  const weighted = dimensions.filter((dimension) => dimension.score !== null && dimension.finalWeight > 0);
+  if (weighted.length === 0) return null;
+  return Math.round(weighted.reduce((sum, dimension) => sum + dimension.score! * dimension.finalWeight, 0) / 100);
 }
 
-function evaluateProperty(
+interface PreliminaryPropertyResult {
+  property: Property;
+  decisionProperty: Property;
+  invalidInputFields: string[];
+  dimensions: DimensionEvaluation[];
+  evidenceItems: ReturnType<typeof buildEvidenceItems>;
+}
+
+function evaluatePropertyDimensions(
   property: Property,
   input: DecisionEngineInput,
   weights: DecisionEngineResult["weights"],
-): PropertyDecisionResult {
+): PreliminaryPropertyResult {
   const decisionProperty = createDecisionPropertyView(property);
   const invalidInputFields = getInvalidPropertyInputFields(property);
   const dimensions = evaluateDimensions({
@@ -58,8 +62,21 @@ function evaluateProperty(
     geoEvidence: input.geoEvidenceByProperty?.[property.id],
     webEvidence: input.webEvidenceByProperty?.[property.id],
   });
-  const overallScore = calculateOverallScore(dimensions);
   const evidenceItems = buildEvidenceItems(decisionProperty, input.preferences);
+  return { property, decisionProperty, invalidInputFields, dimensions, evidenceItems };
+}
+
+function finalizeProperty(
+  preliminary: PreliminaryPropertyResult,
+  input: DecisionEngineInput,
+  effectiveWeights: Record<DimensionKey, number>,
+): PropertyDecisionResult {
+  const { property, decisionProperty, invalidInputFields, evidenceItems } = preliminary;
+  const dimensions = preliminary.dimensions.map((dimension) => ({
+    ...dimension,
+    finalWeight: effectiveWeights[dimension.key],
+  }));
+  const overallScore = calculateOverallScore(dimensions);
   const confidence = calculateConfidence(
     dimensions,
     evidenceItems,
@@ -89,9 +106,18 @@ function evaluateProperty(
 
 export function runDecisionEngine(input: DecisionEngineInput): DecisionEngineResult {
   assertValidInput(input.properties, input.preferences, input.asOfDate);
-  const weights = calculateWeights(input.preferences.purchasePurpose, input.preferences.topPriorities);
-  const results = input.properties
-    .map((property) => evaluateProperty(property, input, weights))
+  const intendedWeights = calculateWeights(
+    input.preferences.purchasePurpose,
+    input.preferences.topPriorities,
+    input.preferences.educationNeed,
+  );
+  const preliminary = input.properties.map((property) => evaluatePropertyDimensions(property, input, intendedWeights));
+  const effectiveComparableDimensions = DIMENSION_KEYS.filter((key) =>
+    intendedWeights[key] > 0 && preliminary.every((candidate) => candidate.dimensions.find((dimension) => dimension.key === key)?.score !== null),
+  );
+  const weights = calculateEffectiveWeights(intendedWeights, effectiveComparableDimensions);
+  const results = preliminary
+    .map((candidate) => finalizeProperty(candidate, input, weights))
     .sort((a, b) => {
       const scoreDifference = (b.overallScore ?? -1) - (a.overallScore ?? -1);
       if (scoreDifference !== 0) return scoreDifference;
@@ -103,6 +129,8 @@ export function runDecisionEngine(input: DecisionEngineInput): DecisionEngineRes
     engineVersion: DECISION_ENGINE_VERSION,
     asOfDate: input.asOfDate,
     weights,
+    intendedWeights,
+    effectiveComparableDimensions,
     results,
     ranking: results.map((result) => result.propertyId),
     rankingProvisional: results.length < 3 || results.some((result) => result.provisional),

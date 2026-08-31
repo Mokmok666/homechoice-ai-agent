@@ -3,6 +3,7 @@ import { createPropertyIdentitySignature } from "@/lib/web-evidence/query-builde
 import { WebSearchProviderError } from "@/lib/web-evidence/provider";
 import { searchPropertyWebEvidence } from "@/lib/web-evidence/search";
 import type { WebEvidenceApiResponse, WebEvidencePropertyIdentity } from "@/lib/web-evidence/types";
+import { DECISION_PRIORITIES, type DecisionPriority } from "@/types/buyer-preferences";
 
 export const runtime = "nodejs";
 
@@ -33,8 +34,12 @@ export async function POST(request: Request): Promise<NextResponse<WebEvidenceAp
   try { body = await request.json(); } catch { return errorResponse("INVALID_REQUEST", "请求内容必须是有效 JSON。", false, 400); }
   const identity = parseIdentity((body as { property?: unknown } | null)?.property);
   if (!identity) return errorResponse("INVALID_REQUEST", "房源名称、城市和行政区不能为空。", false, 400);
+  const requestedPriorities = (body as { topPriorities?: unknown } | null)?.topPriorities;
+  const topPriorities: DecisionPriority[] = Array.isArray(requestedPriorities)
+    ? requestedPriorities.filter((item): item is DecisionPriority => DECISION_PRIORITIES.includes(item as DecisionPriority)).slice(0, 3)
+    : [];
   try {
-    const evidence = await searchPropertyWebEvidence(identity, request.signal);
+    const evidence = await searchPropertyWebEvidence(identity, request.signal, topPriorities);
     if (evidence.propertyIdentitySignature !== createPropertyIdentitySignature(identity)) {
       return errorResponse("PROVIDER_ERROR", "公开来源结果与当前房源身份不匹配。", true, 502);
     }

@@ -5,10 +5,9 @@ import { validateAIAnalysisRequest, validateAIAnalysisResponse, type AINarrative
 import { AI_NARRATIVE_TEMPERATURE, generateAIAnalysis, ZhipuClientError } from "../lib/ai/zhipu-client";
 import { findLatestAIAnalysisForProperty, saveAIAnalysisRecord } from "../lib/ai-analysis-storage";
 import { buildNarrativeFacts } from "../lib/ai/narrative-facts";
-import { createDeterministicNarrative } from "../lib/ai/deterministic-narrative";
+import { createDeterministicKnownNarrative, createDeterministicNarrative } from "../lib/ai/deterministic-narrative";
 import { createAIAnalysisPrompt } from "../lib/ai/prompt";
-import { createAIInputSignature } from "../lib/ai/signature";
-import { projectAIAnalysisContext } from "../lib/ai/input";
+import { createAIAnalysisRequest } from "../lib/ai/request";
 import { runDecisionEngine } from "../lib/decision/engine";
 import { createDemoBuyerPreferences, createDemoProperties } from "../lib/demo/demo-data";
 import { POST as analyzePost } from "../app/api/ai/analyze/route";
@@ -71,7 +70,7 @@ function narrativeFactsRequest(): AIAnalysisRequest {
     },
   };
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     locale: "zh-CN",
     inputSignature: "narrative-facts-test",
     context: {
@@ -148,9 +147,11 @@ function testNarrativeFactsBuilder(): void {
   ].join("\n");
   assert.ok(!/Evidence Gap|UNKNOWN|TOP1_BETTER|candidateComparisons|Narrative Facts|allowedMeaning/.test(userFacingFacts), "J: user-facing fact language must not contain internal terminology");
 
-  const prompt = createAIAnalysisPrompt(request, facts);
-  assert.ok(!prompt.includes('"context"'), "Prompt must not send the full AI decision context after facts projection");
-  assert.ok(createAIInputSignature(request.context).startsWith("aia-v12-"), "Narrative architecture change must invalidate prior current-cache signatures");
+  const promptRequest = routeDiagnosticRequest();
+  const prompt = createAIAnalysisPrompt(promptRequest, facts);
+  assert.ok(prompt.includes('"knownDecisionContext"') && !prompt.includes('"evidencePack"'), "Prompt must send the closed-world KnownDecisionContext rather than the full audit pack");
+  assert.ok(!prompt.includes('"requiredFacts"'), "Normal model prompt must not use Narrative Facts as its primary input");
+  assert.ok(promptRequest.inputSignature.startsWith("aia-v26-"), "Final grounded one-paragraph interpretation must invalidate earlier cached summaries once");
   const totalFacts = facts.requiredFacts.length + facts.comparisonFacts.length + facts.uncertaintyFacts.length + facts.nextStepFacts.length;
   assert.ok(totalFacts >= 8 && totalFacts <= 12, `Narrative facts should remain compact; received ${totalFacts}`);
 }
@@ -383,8 +384,7 @@ function routeDiagnosticRequest(): AIAnalysisRequest {
   const properties = createDemoProperties();
   const preferences = createDemoBuyerPreferences();
   const engine = runDecisionEngine({ properties, preferences, asOfDate: "2026-08-28" });
-  const context = projectAIAnalysisContext({ properties, preferences, engine, geoEvidenceByProperty: {}, webEvidenceByProperty: {} });
-  return { schemaVersion: 2, locale: "zh-CN", inputSignature: createAIInputSignature(context), context };
+  return createAIAnalysisRequest({ properties, preferences, engine, geoEvidenceByProperty: {}, webEvidenceByProperty: {} });
 }
 
 async function callRouteWithProviderMock(
@@ -433,11 +433,31 @@ function assertFallbackRoute(
   if (!result.payload.ok) return;
   assert.equal(result.payload.metadata.model, "deterministic-narrative-v1", `${label}: deterministic fallback must be returned`);
   assert.equal(result.payload.analysis.topPropertyId, request.context.authoritativeTopPropertyId, `${label}: Top1 must remain authoritative`);
-  assert.ok(result.payload.analysis.decisionSummary.includes(request.context.candidates[1].property.name!), `${label}: alternative must be named`);
+  assert.ok(result.payload.analysis.decisionSummary.includes(request.context.candidates[0].property.name!), `${label}: authoritative Top1 must be named`);
+  assert.ok(Array.from(result.payload.analysis.decisionSummary.replace(/\s/g, "")).length <= 200, `${label}: active fallback must stay within 200 visible characters`);
 }
 
 async function testRouteLevelFallbacks(): Promise<void> {
   const request = routeDiagnosticRequest();
+  const activeFallback = createDeterministicKnownNarrative(request.knownDecisionContext);
+  const activeValidation = validateAIAnalysisResponse(
+    { ok: true, analysis: activeFallback, metadata: { generatedAt: "2026-08-30T00:00:00.000Z", inputSignature: request.inputSignature, provider: "zhipu", model: "deterministic-narrative-v1" } },
+    request.context.authoritativeTopPropertyId,
+    request.context.candidates[0].property.name ?? undefined,
+    [request.context.candidates[1].property.name!],
+    false,
+    {
+      educationNeed: request.context.preferences.educationNeed,
+      comparisons: request.context.candidateComparisons,
+      topPropertyName: request.context.candidates[0].property.name ?? undefined,
+      dimensions: request.context.candidates[0].decision.dimensions.map(({ key, label, score, status }) => ({ key, label, score, status })),
+      evidencePack: request.evidencePack,
+      effectivePriorities: request.effectivePriorities,
+      knownDecisionContext: request.knownDecisionContext,
+      requireEvidenceGroundedStructure: false,
+    },
+  );
+  assert.equal(activeValidation.success, true, `active summary fallback must pass route validation: ${activeValidation.success ? "" : activeValidation.errors.join(" | ")} :: ${activeFallback.decisionSummary}`);
 
   const originalSetTimeout = globalThis.setTimeout;
   globalThis.setTimeout = ((callback: TimerHandler) => {

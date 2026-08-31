@@ -8,6 +8,13 @@ import {
 import { DECISION_PRIORITIES, EDUCATION_NEEDS, EDUCATION_STAGES, PURCHASE_PURPOSES, SELECTABLE_COMMUTE_MODES } from "../../types/buyer-preferences";
 import { DIMENSION_KEYS, type DimensionKey } from "../../types/decision";
 import { WEB_EVIDENCE_TARGET_DIMENSIONS } from "../web-evidence/types";
+import type { DecisionPriority } from "../../types/buyer-preferences";
+import type { DecisionEvidencePack } from "../../types/decision-evidence-pack";
+import type { KnownDecisionContext } from "../../types/known-decision-context";
+import { createAIInputSignature } from "./signature";
+import { buildDecisionSignalComparisons, buildPropertyDecisionSignals } from "../decision-signals";
+import { calculateEffectiveWeights, getPriorityDimensions } from "../decision/weights";
+import { buildKnownDecisionContext } from "./known-decision-context";
 
 export type ValidationResult<T> = { success: true; data: T } | { success: false; errors: string[] };
 const RECOMMENDATIONS = ["CONSIDER", "WAIT", "PASS"] as const;
@@ -18,23 +25,55 @@ const FORBIDDEN_ANALYSIS_KEYS = new Set(["score", "matchscore", "overallscore", 
 const INTERNAL_PRODUCT_LANGUAGE = /Top1|Top2|Decision Engine|排名第一|综合评分模型|AI判断|决策引擎认为|根据模型|当前确定性排序|Evidence Gap|Narrative Facts|candidateComparisons|comparisonFacts|requiredFacts|nextStepFacts|prohibitedClaims|allowedMeaning|relationMeaning|TOP1_BETTER|TOP1_WORSE(?:_BUT_WITHIN_TARGET)?|UNKNOWN|EQUAL|CLOSE|validation|dimension key|internal score type|[a-z]+_[a-z_]+/i;
 const INTERNAL_PENDING_LANGUAGE = /结构化事实|外部证据进行AI分析|未来结合.*AI分析/;
 const ABSOLUTE_NEGATIVE_LANGUAGE = /不足|较差|明显弱|缺乏|短板|表现差|配套弱|品质不好/;
+const UNSUPPORTED_POSITIVE_LANGUAGE = /优秀|良好|较好|很好|更强|更优|更好|优势|领先|成熟|完善|出色|表现好/;
 const COMPARISON_RELATIONS = ["TOP1_BETTER", "TOP1_WORSE", "TOP1_WORSE_BUT_WITHIN_TARGET", "EQUAL", "CLOSE", "UNKNOWN"] as const;
 const SCORE_COMPARISON_RELATIONS = ["TOP1_BETTER", "TOP1_WORSE", "EQUAL", "CLOSE", "UNKNOWN"] as const;
 const COMMUTE_LANGUAGE = /通勤|路程|上下班/;
-const COMMUTE_ADVANTAGE_LANGUAGE = /更短|更快|更便利|更匹配|更优|优势|领先|优于/;
+const COMMUTE_ADVANTAGE_LANGUAGE = /更短|更快|短(?:约)?\d+(?:\.\d+)?分钟|更便利|更匹配|更优|优势|领先|优于/;
 const NEGATED_ADVANTAGE_LANGUAGE = /没有.{0,8}优势|并无.{0,8}优势|不具备.{0,8}优势|不能.{0,8}(?:称为|视为).{0,8}优势|不应.{0,8}(?:称为|视为).{0,8}优势/;
 const RELATIVE_INEQUALITY_LANGUAGE = /略逊|逊于|不如|优于|领先于|更强|更弱|更好|更差|更便利|优势更明显|明显优势/;
 const CANDIDATE_ADVANTAGE_LANGUAGE = /更佳|更优|更强|更好|更便利|更匹配|略胜|略有优势|具有优势|优势明显|领先|优于|得分更高/;
 const BUILDING_AREA_RELATIONS = ["TOP1_LARGER", "TOP1_SMALLER", "EQUAL", "UNKNOWN"] as const;
-const SPACE_MATCH_CONCLUSION_LANGUAGE = /空间(?:需求)?匹配(?:度)?(?:更|较|略)?(?:优|高|好)|空间匹配(?:方面)?(?:表现)?(?:良好|较好|不错|有优势|无短板)|空间更匹配|更(?:符合|满足).{0,10}(?:家庭|您的|你的)?(?:空间)?需求|满足(?:了)?(?:您的|你的|家庭).{0,10}(?:空间)?需求|空间方面.{0,5}略胜|空间(?:更)?适合(?:您|家庭)|空间优势明显|居住空间更适合|(?:面积|平方米).{0,16}(?:更满足|满足.{0,6}需求|使.{0,6}更适合)|更大的面积.{0,12}(?:更适合|更匹配|满足)/;
+const SPACE_MATCH_CONCLUSION_LANGUAGE = /空间(?:需求)?匹配(?:度)?(?:更|较|略)?(?:优|高|好)|空间匹配(?:方面)?(?:表现)?(?:良好|较好|不错|有优势|无短板)|空间更匹配|更(?:符合|满足).{0,10}(?:家庭|您的|你的)?空间需求|满足(?:了)?(?:您的|你的|家庭).{0,10}空间需求|空间方面.{0,5}略胜|空间(?:更)?适合(?:您|家庭)|空间优势明显|居住空间更适合|(?:面积|平方米).{0,16}(?:更满足|满足.{0,6}需求|使.{0,6}更适合)|更大的面积.{0,12}(?:更适合|更匹配|满足)/;
 const LAYOUT_CONCLUSION_LANGUAGE = /户型(?:设计)?(?:更好|更优|更合理|表现良好|较好|符合.{0,8}需求)|(?:空间)?布局(?:更好|更优|更合理|表现良好|较好|符合.{0,8}需求)|使用率更高|居住体验更好/;
 const UNCERTAINTY_OR_NEGATION_LANGUAGE = /不能|无法|尚不能|尚无法|暂不能|不代表|并不意味着|不可|尚未明确|证据不足|暂无法判断/;
+const CAUTIOUS_EVIDENCE_LANGUAGE = /现有公开资料|目前可查资料|部分证据|初步|倾向|可能|仍需|尚待|待核实|待确认|信息不足|证据不足|来源存在冲突/;
+const DECISIVE_LANGUAGE = /压倒性|遥遥领先|大幅领先|显著胜出|毫无悬念|明显碾压/;
+const PRIORITY_LANGUAGE: Record<DecisionPriority, RegExp> = {
+  commute: /通勤|上下班|路线时间/,
+  price: /预算|价格|预期成交价|资金余量/,
+  layout_and_space: /户型|空间|面积|房间/,
+  community_quality: /小区品质|社区品质|容积率|绿化率|居住密度|小区环境/,
+  property_management: /物业|管理服务/,
+  education: /教育|学校|学位|入学/,
+  commercial_amenities: /商业配套|商业体|商场|购物中心|商业综合体/,
+  medical_amenities: /医疗配套|医院|医疗可达性/,
+  public_transport: /公共交通|地铁|公交/,
+  liquidity: /流动性|挂牌周期|成交活跃|市场供给/,
+  value_preservation: /长期价值|保值|价值稳定/,
+};
+const SUMMARY_REASON_LANGUAGE = [
+  /通勤|上下班|路线时间/,
+  /预算|预期成交价|资金余量/,
+  /户型|空间|面积|房间/,
+  /小区品质|社区品质|小区环境|居住密度/,
+  /物业|管理服务/,
+  /商业配套|商业体|商场|购物中心|商业综合体/,
+  /医疗配套|正规医院|医院可达性/,
+  /公共交通|地铁|公交/,
+  /交付|房龄|楼龄/,
+] as const;
+const SUMMARY_CONCRETE_DETAIL_LANGUAGE = /\d|你记录的|现场观察|预期成交价|挂牌价|交付|房龄|楼龄|建筑面积|㎡|[一二三四五六]房|商业体|商场|购物中心|正规医院|地铁站|公交站/;
 
 export interface AINarrativeConsistencyConstraint {
   dimensions: Array<{ key: DimensionKey; label: string; score: number | null; status: "known" | "partial" | "unknown" }>;
   educationNeed: "none" | "current" | "future";
   comparisons?: AICandidateComparisonFacts | null;
   topPropertyName?: string;
+  evidencePack?: DecisionEvidencePack;
+  effectivePriorities?: DecisionPriority[];
+  requireEvidenceGroundedStructure?: boolean;
+  knownDecisionContext?: KnownDecisionContext;
 }
 
 function hasUnsupportedUnknownConclusion(text: string, language: RegExp): boolean {
@@ -47,6 +86,7 @@ function hasUnsupportedUnknownConclusion(text: string, language: RegExp): boolea
 
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function isNonEmptyString(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0; }
+function visibleTextLength(value: string): number { return Array.from(value.replace(/\s/gu, "")).length; }
 function isFiniteNumber(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value); }
 function isNullableNumber(value: unknown): boolean { return value === null || isFiniteNumber(value); }
 function isStringArray(value: unknown): value is string[] { return Array.isArray(value) && value.every((item) => typeof item === "string"); }
@@ -338,6 +378,173 @@ function validateContext(value: unknown, errors: string[]): void {
   }
 }
 
+function validateEvidencePack(value: unknown, context: unknown, effectivePriorities: unknown, errors: string[]): void {
+  if (!isRecord(value) || value.version !== 1 || !isRecord(context)) {
+    errors.push("evidencePack is invalid");
+    return;
+  }
+  const ranking = Array.isArray(context.ranking) ? context.ranking : [];
+  const packRanking = Array.isArray(value.ranking) && value.ranking.every(isNonEmptyString) ? value.ranking : [];
+  if (JSON.stringify(packRanking) !== JSON.stringify(ranking)) errors.push("evidencePack ranking must equal deterministic ranking");
+  if (!isRecord(value.buyerContext) || !Array.isArray(value.priorities) || !isRecord(value.topCandidate) || !Array.isArray(value.candidates) || !Array.isArray(value.candidateComparisons) || !Array.isArray(value.signalComparisons) || !isRecord(value.weights)) {
+    errors.push("evidencePack structure is incomplete");
+    return;
+  }
+  const buyerPriorities = Array.isArray(value.buyerContext.topPriorities) ? value.buyerContext.topPriorities : [];
+  const packPriorities = value.priorities.map((item) => isRecord(item) ? item.priority : null);
+  if (JSON.stringify(packPriorities) !== JSON.stringify(buyerPriorities)) errors.push("evidencePack priorities are inconsistent");
+  const contextPreferences = isRecord(context.preferences) ? context.preferences : null;
+  if (
+    !contextPreferences
+    || value.buyerContext.purchasePurpose !== contextPreferences.purchasePurpose
+    || value.buyerContext.maximumBudget !== contextPreferences.maximumBudget
+    || value.buyerContext.educationNeed !== contextPreferences.educationNeed
+    || JSON.stringify(buyerPriorities) !== JSON.stringify(contextPreferences.topPriorities)
+  ) {
+    errors.push("evidencePack buyer context contradicts analysis context");
+  }
+  if (value.topCandidate.propertyId !== packRanking[0] || value.topCandidate.rank !== 1) errors.push("evidencePack Top1 is inconsistent");
+  if (value.candidates.length !== packRanking.length) errors.push("evidencePack candidates must match ranking");
+  const packCandidates = value.candidates;
+  packCandidates.forEach((candidate, index) => {
+    if (!isRecord(candidate) || !isRecord(candidate.property) || candidate.property.id !== packRanking[index] || candidate.rank !== index + 1 || !isOneOf(candidate.recommendation, RECOMMENDATIONS)) {
+      errors.push(`evidencePack.candidates[${index}] is invalid`);
+      return;
+    }
+    const packDimensions = Array.isArray(candidate.dimensionResults) ? candidate.dimensionResults : [];
+    if (packDimensions.length !== DIMENSION_KEYS.length) {
+      errors.push(`evidencePack.candidates[${index}] must contain all 15 dimensions`);
+    }
+    const contextCandidate = Array.isArray(context.candidates) && isRecord(context.candidates[index])
+      ? context.candidates[index]
+      : null;
+    const contextDecision = contextCandidate && isRecord(contextCandidate.decision) ? contextCandidate.decision : null;
+    const contextProperty = contextCandidate && isRecord(contextCandidate.property) ? contextCandidate.property : null;
+    if (
+      !contextDecision
+      || !contextProperty
+      || candidate.property.name !== contextProperty.name
+      || candidate.property.totalPrice !== contextProperty.expectedTransactionPrice
+      || (candidate.property.listingPrice ?? null) !== contextProperty.listingPrice
+      || candidate.property.area !== contextProperty.area
+      || candidate.overallScore !== contextDecision.matchScore
+      || candidate.recommendation !== contextDecision.recommendation
+      || !Array.isArray(contextDecision.dimensions)
+      || JSON.stringify(packDimensions.map((dimension) => isRecord(dimension)
+        ? { key: dimension.key, score: dimension.score, status: dimension.status }
+        : null)) !== JSON.stringify(contextDecision.dimensions.map((dimension) => isRecord(dimension)
+        ? { key: dimension.key, score: dimension.score, status: dimension.status }
+        : null))
+    ) {
+      errors.push(`evidencePack.candidates[${index}] contradicts deterministic results`);
+    }
+    if (!(candidate.amapEvidence === null || isRecord(candidate.amapEvidence)) || !(candidate.webEvidence === null || isRecord(candidate.webEvidence)) || !Array.isArray(candidate.scoreableWebEvidence) || !Array.isArray(candidate.contextualVerifiedEvidence) || !Array.isArray(candidate.sources) || !Array.isArray(candidate.decisionSignals)) {
+      errors.push(`evidencePack.candidates[${index}] evidence is invalid`);
+    }
+    if (isRecord(candidate.property) && Array.isArray(candidate.decisionSignals)) {
+      const expectedSignals = buildPropertyDecisionSignals(
+        candidate.property as unknown as import("../../types/property").Property,
+        isRecord(candidate.webEvidence) ? candidate.webEvidence as unknown as import("../web-evidence/types").PropertyWebEvidence : undefined,
+      );
+      if (JSON.stringify(candidate.decisionSignals) !== JSON.stringify(expectedSignals)) errors.push(`evidencePack.candidates[${index}] decision signals are inconsistent`);
+    }
+    for (const item of [...(candidate.scoreableWebEvidence as unknown[] ?? []), ...(candidate.contextualVerifiedEvidence as unknown[] ?? [])]) {
+      if (!isRecord(item) || !isNonEmptyString(item.propertyId) || !isOneOf(item.dimension, WEB_EVIDENCE_TARGET_DIMENSIONS) || !["verified", "partially_verified", "conflicting", "insufficient"].includes(String(item.status)) || !["high", "medium", "low"].includes(String(item.confidence)) || !Array.isArray(item.sources)) {
+        errors.push(`evidencePack.candidates[${index}] verified evidence is invalid`);
+      }
+    }
+  });
+  const topCandidate = packCandidates[0];
+  if (isRecord(topCandidate) && isRecord(topCandidate.property) && topCandidate.property.id !== value.topCandidate.propertyId) errors.push("evidencePack Top1 candidate is inconsistent");
+  if (packRanking.length > 1) {
+    if (value.candidateComparisons.length !== packRanking.length - 1) errors.push("evidencePack comparisons are incomplete");
+    value.candidateComparisons.forEach((comparison, index) => {
+      if (!isRecord(comparison) || comparison.topCandidateId !== packRanking[0] || comparison.alternativeId !== packRanking[index + 1] || !Array.isArray(comparison.dimensions) || comparison.dimensions.length !== DIMENSION_KEYS.length) {
+        errors.push(`evidencePack.candidateComparisons[${index}] is invalid`);
+        return;
+      }
+      const topDimensions = isRecord(packCandidates[0]) && Array.isArray(packCandidates[0].dimensionResults) ? packCandidates[0].dimensionResults : [];
+      const alternative = packCandidates[index + 1];
+      const alternativeDimensions = isRecord(alternative) && Array.isArray(alternative.dimensionResults) ? alternative.dimensionResults : [];
+      comparison.dimensions.forEach((dimension, dimensionIndex) => {
+        const topDimension = topDimensions[dimensionIndex];
+        const alternativeDimension = alternativeDimensions[dimensionIndex];
+        if (!isRecord(dimension) || !isRecord(topDimension) || !isRecord(alternativeDimension)) return;
+        const topScore = typeof topDimension.score === "number" ? topDimension.score : null;
+        const alternativeScore = typeof alternativeDimension.score === "number" ? alternativeDimension.score : null;
+        const difference = topScore === null || alternativeScore === null ? null : topScore - alternativeScore;
+        const expectedRelation = difference === null ? "unknown" : difference === 0 ? "equal" : Math.abs(difference) < 5 ? "close" : difference > 0 ? "top_better" : "top_worse";
+        if (dimension.dimension !== topDimension.key || dimension.topScore !== topScore || dimension.alternativeScore !== alternativeScore || dimension.relation !== expectedRelation) {
+          errors.push(`evidencePack.candidateComparisons[${index}].dimensions[${dimensionIndex}] contradicts deterministic results`);
+        }
+      });
+    });
+  }
+  const expectedSignalComparisons = buildDecisionSignalComparisons(packCandidates.flatMap((candidate) =>
+    isRecord(candidate) && isRecord(candidate.property) && isNonEmptyString(candidate.property.id) && Array.isArray(candidate.decisionSignals)
+      ? [{ propertyId: candidate.property.id, signals: candidate.decisionSignals as unknown as import("../../types/decision-signals").DecisionSignal[] }]
+      : []));
+  if (JSON.stringify(value.signalComparisons) !== JSON.stringify(expectedSignalComparisons)) errors.push("evidencePack signal comparisons are inconsistent");
+  if (!isRecord(value.intendedWeights) || !isRecord(value.effectiveWeights) || !Array.isArray(value.effectiveComparableDimensions)) {
+    errors.push("evidencePack comparable-weight metadata is incomplete");
+  } else {
+    const intended = value.intendedWeights as Record<DimensionKey, number>;
+    const expectedComparable = DIMENSION_KEYS.filter((key) =>
+      typeof intended[key] === "number" && intended[key] > 0 && packCandidates.every((candidate) =>
+        isRecord(candidate) && Array.isArray(candidate.dimensionResults) && candidate.dimensionResults.some((dimension) => isRecord(dimension) && dimension.key === key && typeof dimension.score === "number")),
+    );
+    if (JSON.stringify(value.effectiveComparableDimensions) !== JSON.stringify(expectedComparable)) errors.push("evidencePack comparable dimensions contradict candidate coverage");
+    const expectedWeights = calculateEffectiveWeights(intended, expectedComparable);
+    for (const key of DIMENSION_KEYS) {
+      const actual = value.effectiveWeights[key];
+      const legacy = value.weights[key];
+      if (typeof actual !== "number" || typeof legacy !== "number" || Math.abs(actual - expectedWeights[key]) > 0.0001 || Math.abs(legacy - expectedWeights[key]) > 0.0001) {
+        errors.push(`evidencePack effective weight for ${key} is inconsistent`);
+        break;
+      }
+    }
+  }
+  const validEffective = Array.isArray(effectivePriorities) && effectivePriorities.every((item) => isOneOf(item, DECISION_PRIORITIES));
+  if (!validEffective) errors.push("effectivePriorities is invalid");
+  else {
+    const educationNeed = value.buyerContext.educationNeed;
+    const comparable = new Set(Array.isArray(value.effectiveComparableDimensions) ? value.effectiveComparableDimensions : []);
+    const expected = buyerPriorities.filter((priority) => {
+      if (educationNeed === "none" && priority === "education") return false;
+      return getPriorityDimensions(priority as DecisionPriority).some((dimension) => comparable.has(dimension));
+    });
+    if (JSON.stringify(effectivePriorities) !== JSON.stringify(expected)) errors.push("effectivePriorities must reflect buyer priorities and comparable evidence");
+  }
+}
+
+function validateKnownDecisionContext(value: unknown, evidencePack: unknown, errors: string[]): void {
+  if (!isRecord(value) || value.version !== 1 || !isRecord(evidencePack)) {
+    errors.push("knownDecisionContext is invalid");
+    return;
+  }
+  const ranking = Array.isArray(value.ranking) ? value.ranking : [];
+  const packRanking = Array.isArray(evidencePack.ranking) ? evidencePack.ranking : [];
+  if (JSON.stringify(ranking) !== JSON.stringify(packRanking)) errors.push("knownDecisionContext ranking is inconsistent");
+  if (!isRecord(value.authoritativeTop1) || value.authoritativeTop1.propertyId !== packRanking[0]) errors.push("knownDecisionContext Top1 is inconsistent");
+  if (!Array.isArray(value.effectiveComparableDimensions) || !isRecord(value.intendedWeights) || !isRecord(value.effectiveWeights) || !Array.isArray(value.candidates) || !Array.isArray(value.decisiveKnownFactors) || !Array.isArray(value.attentionCandidates)) {
+    errors.push("knownDecisionContext structure is incomplete");
+    return;
+  }
+  const comparable = new Set(value.effectiveComparableDimensions);
+  const effectiveWeights = value.effectiveWeights as Record<string, unknown>;
+  const effectiveTotal = DIMENSION_KEYS.reduce((sum, key) => sum + (typeof effectiveWeights[key] === "number" ? effectiveWeights[key] as number : 0), 0);
+  if (Math.abs(effectiveTotal - 100) > 0.0001) errors.push("knownDecisionContext effective weights must sum to 100");
+  value.decisiveKnownFactors.forEach((factor, index) => {
+    if (!isRecord(factor) || !isOneOf(factor.dimension, DIMENSION_KEYS) || !comparable.has(factor.dimension)) errors.push(`knownDecisionContext.decisiveKnownFactors[${index}] is not comparable`);
+  });
+  try {
+    const expected = buildKnownDecisionContext(evidencePack as unknown as DecisionEvidencePack);
+    if (JSON.stringify(value) !== JSON.stringify(expected)) errors.push("knownDecisionContext contradicts the canonical evidence pack");
+  } catch {
+    errors.push("knownDecisionContext cannot be rebuilt from the canonical evidence pack");
+  }
+}
+
 export function validateAIAnalysisRequest(value: unknown): ValidationResult<AIAnalysisRequest> {
   const errors: string[] = [];
   if (!isRecord(value)) return { success: false, errors: ["request must be an object"] };
@@ -345,7 +552,172 @@ export function validateAIAnalysisRequest(value: unknown): ValidationResult<AIAn
   if (value.locale !== "zh-CN") errors.push("locale must be zh-CN");
   if (!isNonEmptyString(value.inputSignature)) errors.push("inputSignature is required");
   validateContext(value.context, errors);
+  validateEvidencePack(value.evidencePack, value.context, value.effectivePriorities, errors);
+  validateKnownDecisionContext(value.knownDecisionContext, value.evidencePack, errors);
+  if (
+    isRecord(value.context)
+    && isRecord(value.evidencePack)
+    && Array.isArray(value.effectivePriorities)
+    && isNonEmptyString(value.inputSignature)
+    && createAIInputSignature(
+      value.context as unknown as AIAnalysisRequest["context"],
+      value.evidencePack as unknown as DecisionEvidencePack,
+      value.effectivePriorities as DecisionPriority[],
+      value.knownDecisionContext as unknown as AIAnalysisRequest["knownDecisionContext"],
+    ) !== value.inputSignature
+  ) {
+    errors.push("inputSignature does not match authoritative request data");
+  }
   return errors.length ? { success: false, errors } : { success: true, data: value as unknown as AIAnalysisRequest };
+}
+
+function collectAllowedNumbers(value: unknown, output: Set<number>): void {
+  if (typeof value === "number" && Number.isFinite(value)) { output.add(value); return; }
+  if (typeof value === "string") {
+    for (const match of value.matchAll(/(?<![A-Za-z_])\d+(?:\.\d+)?/g)) output.add(Number(match[0]));
+    return;
+  }
+  if (Array.isArray(value)) { value.forEach((item) => collectAllowedNumbers(item, output)); return; }
+  if (isRecord(value)) Object.values(value).forEach((item) => collectAllowedNumbers(item, output));
+}
+
+function validateNumericGrounding(text: string, pack: DecisionEvidencePack, errors: string[]): void {
+  const allowed = new Set<number>();
+  collectAllowedNumbers(pack, allowed);
+  const prices = pack.candidates.map((candidate) => candidate.property.totalPrice);
+  const areas = pack.candidates.map((candidate) => candidate.property.area);
+  const budget = pack.buyerContext.maximumBudget;
+  for (const price of prices) allowed.add(Math.abs(budget - price));
+  for (let left = 0; left < prices.length; left += 1) for (let right = left + 1; right < prices.length; right += 1) allowed.add(Math.abs(prices[left] - prices[right]));
+  for (let left = 0; left < areas.length; left += 1) for (let right = left + 1; right < areas.length; right += 1) allowed.add(Math.round(Math.abs(areas[left] - areas[right]) * 10) / 10);
+  for (const token of text.match(/(?<![A-Za-z_])\d+(?:\.\d+)?/g) ?? []) {
+    const numeric = Number(token);
+    if (![...allowed].some((item) => Math.abs(item - numeric) < 0.001)) {
+      errors.push("analysis contains a numeric fact absent from authoritative evidence");
+      break;
+    }
+  }
+}
+
+function textForAnalysis(analysis: Record<string, unknown>): string {
+  return [
+    analysis.decisionSummary,
+    analysis.whyWinner,
+    analysis.tradeoff,
+    ...(Array.isArray(analysis.decisionFactors) ? analysis.decisionFactors.flatMap((item) => isRecord(item) ? [item.comparison, item.verdict, item.reasoning] : []) : []),
+    ...(Array.isArray(analysis.attentionItems) ? analysis.attentionItems : []),
+    ...(Array.isArray(analysis.topPriorityAnalysis) ? analysis.topPriorityAnalysis.map((item) => isRecord(item) ? item.analysis : "") : []),
+    ...(Array.isArray(analysis.additionalInsight) ? analysis.additionalInsight : []),
+    ...(Array.isArray(analysis.risksOrUnknowns) ? analysis.risksOrUnknowns : []),
+    ...(Array.isArray(analysis.pendingEvidence) ? analysis.pendingEvidence : []),
+  ].filter((item): item is string => typeof item === "string").join("\n");
+}
+
+function validateEvidenceGrounding(analysis: Record<string, unknown>, consistency: AINarrativeConsistencyConstraint, errors: string[]): void {
+  const pack = consistency.evidencePack;
+  const effectivePriorities = consistency.effectivePriorities ?? [];
+  if (!pack) return;
+  const fullText = textForAnalysis(analysis);
+  validateNumericGrounding(fullText, pack, errors);
+
+  if (consistency.requireEvidenceGroundedStructure) {
+    const knownContext = consistency.knownDecisionContext;
+    const summary = typeof analysis.decisionSummary === "string" ? analysis.decisionSummary.trim() : "";
+    if (/\n\s*\n/.test(summary) || /(?:^|\n)\s*(?:[-*•]|\d+[.、])/.test(summary) || /推荐结论\s*[：:]|关键决策依据\s*[：:]|为什么最终推荐|关键取舍\s*[：:]|风险与待确认\s*[：:]|下一步建议\s*[：:]/.test(summary)) {
+      errors.push("analysis.decisionSummary must be one natural paragraph rather than a sectioned report");
+    }
+    const uncertaintyClauses = summary
+      .split(/[。！？；\n]+/)
+      .filter((clause) => /缺少|不足以判断|尚待确认|无法判断|待补充|需要补齐/.test(clause));
+    if (uncertaintyClauses.length >= 2) errors.push("analysis.decisionSummary must not become a missing-data report");
+    if (Array.isArray(analysis.pendingEvidence) && analysis.pendingEvidence.length > 0) errors.push("analysis.pendingEvidence must be empty for the final summary");
+    if (knownContext && knownContext.buyer.usableTop3.length > 0) {
+      const referencesCurrentPriority = knownContext.buyer.usableTop3.some((priority) => PRIORITY_LANGUAGE[priority.priority].test(summary));
+      if (!referencesCurrentPriority) errors.push("analysis.decisionSummary does not reflect any usable current priority");
+    } else if (effectivePriorities.length > 0 && !effectivePriorities.some((priority) => PRIORITY_LANGUAGE[priority].test(summary))) {
+      errors.push("analysis.decisionSummary does not reflect current buyer preferences");
+    }
+  }
+
+  if (pack.candidates.length > 1) {
+    const topScore = pack.candidates[0].overallScore;
+    const alternativeScore = pack.candidates[1].overallScore;
+    if (topScore !== null && alternativeScore !== null && Math.abs(topScore - alternativeScore) < 5 && DECISIVE_LANGUAGE.test(fullText)) {
+      errors.push("analysis exaggerates a close deterministic ranking");
+    }
+  }
+
+  for (const candidate of pack.candidates) {
+    const listingPrice = candidate.property.listingPrice;
+    if (listingPrice === null || listingPrice === undefined || listingPrice === candidate.property.totalPrice) continue;
+    const listingToken = String(listingPrice);
+    const clauses = fullText.split(/[。！？；\n]+/).filter((clause) => clause.includes(listingToken));
+    const mislabelsListingPrice = clauses.some((clause) => {
+      if (/挂牌/.test(clause)) return false;
+      const escaped = listingToken.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`(?:成交(?:价)?|网签(?:价)?)\\s*(?:约)?\\s*${escaped}(?:\\s*万)?|${escaped}\\s*(?:万(?:元)?)?\\s*(?:的)?(?:成交价|成交|网签价|网签)`).test(clause);
+    });
+    if (mislabelsListingPrice) errors.push("analysis confuses listing price with transaction price");
+  }
+
+  const webItems = pack.candidates.flatMap((candidate) =>
+    (candidate.webEvidence?.dimensions.flatMap((dimension) => dimension.verifiedEvidence ?? []) ?? [])
+      .map((item) => ({ candidate, item })));
+  for (const { candidate, item } of webItems) {
+    const valueText = String(item.value);
+    if (valueText.length < 2 || !fullText.includes(valueText)) continue;
+    const clauses = fullText.split(/[。！？；\n]+/).filter((clause) => clause.includes(valueText));
+    const independentlyGrounded = JSON.stringify({
+      property: candidate.property,
+      amapEvidence: candidate.amapEvidence,
+      decisionSignals: candidate.decisionSignals.filter((signal) => signal.status === "available"),
+      scoreableWebEvidence: candidate.scoreableWebEvidence,
+    }).includes(valueText);
+    if (item.status === "partially_verified" && clauses.some((clause) =>
+      !CAUTIOUS_EVIDENCE_LANGUAGE.test(clause)
+      && !/你(?:所)?记录|用户记录|现场观察|看房观察|主观体验/.test(clause)
+      && !independentlyGrounded)) {
+      errors.push(`analysis presents partially verified ${item.dimension} evidence as confirmed`);
+    }
+    if (item.status === "conflicting" && clauses.some((clause) => !/冲突|不一致|尚无法判断|无法确认/.test(clause) || UNSUPPORTED_POSITIVE_LANGUAGE.test(clause))) {
+      errors.push(`analysis uses conflicting ${item.dimension} evidence as a conclusion`);
+    }
+    if (item.status === "insufficient" && clauses.some((clause) => !UNCERTAINTY_OR_NEGATION_LANGUAGE.test(clause) && !CAUTIOUS_EVIDENCE_LANGUAGE.test(clause))) {
+      errors.push(`analysis uses insufficient ${item.dimension} evidence as confirmed`);
+    }
+  }
+
+  const topCandidate = pack.candidates[0];
+  const topName = topCandidate?.property.name ?? "";
+  for (const candidate of pack.candidates) {
+    for (const signal of candidate.decisionSignals) {
+      const clauses = fullText.split(/[。！？；\n]+/).filter((clause) => clause.includes(signal.label));
+      if (signal.source === "user_reported" && signal.status === "available" && clauses.some((clause) =>
+        UNSUPPORTED_POSITIVE_LANGUAGE.test(clause) && !/你(?:所)?记录|用户记录|现场观察|看房观察|主观体验/.test(clause))) {
+        errors.push(`analysis presents user-reported ${signal.key} as externally verified`);
+      }
+      if (signal.status === "conflicting" && clauses.some((clause) => UNSUPPORTED_POSITIVE_LANGUAGE.test(clause) || /确定|确认无误|已经证实/.test(clause))) {
+        errors.push(`analysis resolves conflicting ${signal.key} without authority`);
+      }
+    }
+  }
+  for (const comparison of pack.signalComparisons) {
+    const alternative = pack.candidates.find((candidate) => candidate.property.id === comparison.alternativeId);
+    if (!alternative || !topName) continue;
+    const language = new RegExp(comparison.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    if (comparison.relation === "top_weaker" && hasCandidateDimensionAdvantageClaim(fullText, topName, language)) {
+      errors.push(`analysis reverses user-reported ${comparison.key} comparison`);
+    }
+    if (comparison.relation === "top_stronger" && hasCandidateDimensionAdvantageClaim(fullText, alternative.property.name, language)) {
+      errors.push(`analysis reverses user-reported ${comparison.key} comparison`);
+    }
+    if (["top_higher", "top_lower", "conflicting"].includes(comparison.relation)) {
+      const clauses = fullText.split(/[。！？；\n]+/).filter((clause) => language.test(clause));
+      if (clauses.some((clause) => CANDIDATE_ADVANTAGE_LANGUAGE.test(clause) && !/仅|只|不能|不代表|并不意味着/.test(clause))) {
+        errors.push(`analysis turns factual ${comparison.key} difference into an unsupported advantage`);
+      }
+    }
+  }
 }
 
 function validateAnalysis(
@@ -358,7 +730,7 @@ function validateAnalysis(
   consistency?: AINarrativeConsistencyConstraint,
 ): void {
   if (!isRecord(analysis)) { errors.push("analysis must be an object"); return; }
-  if (!hasOnlyKeys(analysis, ["topPropertyId", "topPropertyName", "decisionSummary", "pendingEvidence", "disclaimer"])) errors.push("analysis contains unexpected fields");
+  if (!hasOnlyKeys(analysis, ["topPropertyId", "topPropertyName", "decisionSummary", "decisionFactors", "whyWinner", "attentionItems", "topPriorityAnalysis", "tradeoff", "additionalInsight", "risksOrUnknowns", "pendingEvidence", "disclaimer"])) errors.push("analysis contains unexpected fields");
   if (hasForbiddenAnalysisKey(analysis)) errors.push("analysis must not contain scores, ranking, recommendation or weights");
   if (!isNonEmptyString(analysis.topPropertyId) || (expectedTopPropertyId && analysis.topPropertyId !== expectedTopPropertyId)) errors.push("analysis.topPropertyId must equal deterministic Top1");
   if (!isNonEmptyString(analysis.topPropertyName) || (expectedTopPropertyName && !isSameCandidateName(analysis.topPropertyName, expectedTopPropertyName))) errors.push("analysis.topPropertyName must map to deterministic Top1 name");
@@ -366,11 +738,19 @@ function validateAnalysis(
     errors.push("analysis.decisionSummary must be a non-empty string");
   } else {
     const decisionSummary = analysis.decisionSummary;
-    if (INTERNAL_PRODUCT_LANGUAGE.test(decisionSummary)) errors.push("analysis.decisionSummary contains internal product language");
-    if (expectedAlternativeNames.length > 0 && !expectedAlternativeNames.some((name) => referencesCandidateName(decisionSummary, name))) errors.push("analysis.decisionSummary must reference the authoritative alternative");
+    const allAnalysisText = textForAnalysis(analysis);
+    if (INTERNAL_PRODUCT_LANGUAGE.test(allAnalysisText)) errors.push("analysis contains internal product language");
+    if (consistency?.knownDecisionContext && visibleTextLength(decisionSummary) > 200) errors.push("analysis.decisionSummary must not exceed 200 visible characters");
+    if (consistency?.knownDecisionContext && /\r|\n/.test(decisionSummary)) errors.push("analysis.decisionSummary must be one paragraph");
+    if (consistency?.knownDecisionContext) {
+      if (/(?:匹配度|评分|得分).{0,8}\d+(?:\.\d+)?%|\d+(?:\.\d+)?%.{0,8}(?:匹配度|评分|得分)/.test(decisionSummary)) errors.push("analysis.decisionSummary must not expose scores");
+      const reasonCount = SUMMARY_REASON_LANGUAGE.filter((language) => language.test(decisionSummary)).length;
+      if (reasonCount < 2) errors.push("analysis.decisionSummary must contain at least two grounded reasons");
+      if (!SUMMARY_CONCRETE_DETAIL_LANGUAGE.test(decisionSummary)) errors.push("analysis.decisionSummary must include concrete grounded detail");
+    }
     if (requiresCommuteBoundaryNuance && /均.{0,8}(?:理想时间|理想通勤|理想范围)|(?:都|均)在.{0,6}理想/.test(decisionSummary)) errors.push("analysis.decisionSummary misstates commute threshold");
     if (consistency) {
-      const clauses = decisionSummary.split(/[。！？；\n]+/).map((item) => item.trim()).filter(Boolean);
+      const clauses = allAnalysisText.split(/[。！？；\n]+/).map((item) => item.trim()).filter(Boolean);
       for (const dimension of consistency.dimensions) {
         const related = clauses.filter((clause) => clause.includes(dimension.label));
         if (dimension.score !== null && dimension.score >= 80 && related.some((clause) => ABSOLUTE_NEGATIVE_LANGUAGE.test(clause))) {
@@ -378,6 +758,9 @@ function validateAnalysis(
         }
         if ((dimension.score === null || dimension.status === "unknown") && related.some((clause) => /表现差|配套弱|品质不好|明显弱|较差|短板/.test(clause))) {
           errors.push(`analysis.decisionSummary treats unknown ${dimension.label} as negative`);
+        }
+        if ((dimension.score === null || dimension.status === "unknown") && related.some((clause) => UNSUPPORTED_POSITIVE_LANGUAGE.test(clause) && !UNCERTAINTY_OR_NEGATION_LANGUAGE.test(clause))) {
+          errors.push(`analysis.decisionSummary treats unknown ${dimension.label} as confirmed positive`);
         }
       }
       if (consistency.educationNeed === "none") {
@@ -387,21 +770,22 @@ function validateAnalysis(
         }
       }
       const spaceMatch = consistency.dimensions.find((dimension) => dimension.key === "space_match");
-      if ((spaceMatch?.score === null || spaceMatch?.status === "unknown") && hasUnsupportedUnknownConclusion(decisionSummary, SPACE_MATCH_CONCLUSION_LANGUAGE)) {
+      if ((spaceMatch?.score === null || spaceMatch?.status === "unknown") && hasUnsupportedUnknownConclusion(allAnalysisText, SPACE_MATCH_CONCLUSION_LANGUAGE)) {
         errors.push("analysis.decisionSummary infers household space match from unknown evidence");
       }
       const layoutDesign = consistency.dimensions.find((dimension) => dimension.key === "layout_design");
-      if ((layoutDesign?.score === null || layoutDesign?.status === "unknown") && hasUnsupportedUnknownConclusion(decisionSummary, LAYOUT_CONCLUSION_LANGUAGE)) {
+      if ((layoutDesign?.score === null || layoutDesign?.status === "unknown") && hasUnsupportedUnknownConclusion(allAnalysisText, LAYOUT_CONCLUSION_LANGUAGE)) {
         errors.push("analysis.decisionSummary infers layout quality from unknown evidence");
       }
       if (consistency.comparisons && consistency.topPropertyName) {
         validateRelativeComparisonConsistency(
-          decisionSummary,
+          allAnalysisText,
           consistency.comparisons,
           consistency.topPropertyName,
           errors,
         );
       }
+      validateEvidenceGrounding(analysis, consistency, errors);
     }
   }
   if (!isStringArray(analysis.pendingEvidence) || analysis.pendingEvidence.length > 5 || analysis.pendingEvidence.some((item) => !isNonEmptyString(item)) || !isNonEmptyString(analysis.disclaimer)) {

@@ -19,6 +19,8 @@ const INSUFFICIENT_CONCLUSIONS: Record<WebEvidenceDimensionKey, string> = {
   location_maturity: "现有公开资料不足以判断该片区当前成熟度。",
   community_quality: "当前缺少足够项目级公开证据，暂无法判断小区实际品质。",
   property_management: "当前公开资料不足以判断该小区物业服务水平。",
+  building_age: "当前缺少足够可信的交付或竣工年份证据，暂无法确认楼龄。",
+  layout_design: "当前缺少足够户型结构证据，暂无法判断户型设计。",
   education: "当前缺少有效的官方招生范围证据，暂无法确认房源与学校的入学关系。",
   transaction_price_reasonableness: "当前缺少足够真实成交样本，暂无法判断该价格是否处于合理区间。",
   liquidity: "当前缺少足够真实成交和市场活跃度证据，暂无法判断该房源流动性。",
@@ -42,6 +44,12 @@ function classifyFact(dimensionKey: WebEvidenceDimensionKey, claim: string, tran
       if (/物业类型|住宅物业|商业物业|物业为住宅|物业为商业|建筑类型|产权类型|板楼|塔楼|开发商/.test(text) && !/物业公司|物业管理|物业服务|物业费|投诉|服务记录/.test(text)) return "IRRELEVANT";
       if (/物业服务|物业费|服务范围|服务记录|投诉|业主反馈|住户反馈|物业管理质量/.test(text)) return "DIRECT";
       return /物业公司|物业管理公司|管理主体|物业为|物业：/.test(text) ? "PARTIAL" : "IRRELEVANT";
+    case "building_age":
+      if (/开盘|预售|拿地|施工开始|开工/.test(text) && !/交付|交房|竣工|建成/.test(text)) return "IRRELEVANT";
+      return /交付|交房|竣工|建成/.test(text) && /(?:19|20)\d{2}/.test(text) ? "DIRECT" : "IRRELEVANT";
+    case "layout_design":
+      if (/面积|\d+㎡|\d+平/.test(text) && !/户型|朝向|阳台|梯户比|开间|进深/.test(text)) return "IRRELEVANT";
+      return /户型|朝向|阳台|梯户比|开间|进深/.test(text) ? "DIRECT" : "IRRELEVANT";
     case "education":
       if (/开发商|中介|学区房|名校旁|名校附近/.test(text) && !/教育局|政府|招生范围|服务范围|划片|对口/.test(text)) return "IRRELEVANT";
       if (/教育局|政府|招生范围|服务范围|划片|对口|入学范围/.test(text)) return "DIRECT";
@@ -177,7 +185,14 @@ export function validateWebEvidenceInterpretationOutput(
       supportingFacts: groundedSupportingFacts,
     });
   }
-  if (seen.size !== usable.length) errors.push("output must include every usable dimension exactly once");
+  for (const inputDimension of usable) {
+    if (seen.has(inputDimension.dimensionKey)) continue;
+    dimensions.push({
+      dimensionKey: inputDimension.dimensionKey,
+      conclusion: INSUFFICIENT_CONCLUSIONS[inputDimension.dimensionKey],
+      supportingFacts: [],
+    });
+  }
   if (errors.length) return { success: false, errors };
   return {
     success: true,

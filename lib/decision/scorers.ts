@@ -14,6 +14,8 @@ import type { ComparableTransaction, Property } from "../../types/property";
 import type { GeoEvidenceQuality, PropertyGeoEvidence } from "../../types/geo-evidence";
 import type { DimensionWebEvidence, PropertyWebEvidence, WebEvidenceFact } from "../web-evidence/types";
 import { normalizePropertyName } from "../web-evidence/relevance";
+import { verifiedScoreableValue } from "../web-evidence/verified-evidence";
+import { blendUserObservationScore, buildUserObservationScoreSummary, NOISE_LABELS, QUALITY_LABELS } from "../decision-signals";
 import { validateMetroDistance, validateTextField } from "./dataQuality";
 import { AI_DIMENSIONS, BASE_WEIGHTS, DIMENSION_LABELS } from "./dimensions";
 
@@ -87,19 +89,58 @@ function partial(
   });
 }
 
+export function calculateBudgetMatchScore(expectedTransactionPrice: number, maximumBudget: number): number {
+  const ratio = expectedTransactionPrice / maximumBudget;
+  let score: number;
+  if (ratio <= 0.7) score = 96;
+  else if (ratio <= 0.85) score = 100;
+  else if (ratio <= 0.95) score = 94;
+  else if (ratio <= 1) score = 86;
+  else if (ratio <= 1.05) score = 60;
+  else if (ratio <= 1.1) score = 35;
+  else score = 15;
+
+  return Math.round(clamp(score));
+}
+
+function observationValueLabel(value: string): string {
+  if (value in QUALITY_LABELS) return QUALITY_LABELS[value as keyof typeof QUALITY_LABELS];
+  return NOISE_LABELS[value as keyof typeof NOISE_LABELS] ?? value;
+}
+
+function applyUserReportedObservationScore(
+  context: ScoringContext,
+  base: DimensionEvaluation,
+): DimensionEvaluation {
+  const summary = buildUserObservationScoreSummary(context.property, base.key);
+  if (!summary) return base;
+  const blend = blendUserObservationScore(base.score, summary);
+  const observations = blend.signals.map((item) => `${item.label}：${observationValueLabel(item.value)}`).join("、");
+  const baseExplanation = blend.baseScoreAvailable
+    ? `与原有 ${blend.baseScoreUsed} 分基础结果融合`
+    : "原有外部/项目级得分不可用，计算仅使用 50 分中性先验作为有界锚点；这不代表实际表现为一般";
+  return evaluation(context, base.key, {
+    score: blend.finalScore,
+    status: base.score === null ? "partial" : base.status,
+    evidence: [
+      ...base.evidence,
+      {
+        source: "user_reported",
+        quality: 0.65,
+        description: `用户记录的结构化观察（${observations}）；已知 ${blend.knownCount} 项，观察子分 ${Math.round(blend.normalizedScore * 100)} 分，以 ${Math.round(blend.observationWeight * 100)}% 上限计入${DIMENSION_LABELS[base.key]}；${baseExplanation}，最终 ${blend.finalScore} 分`,
+      },
+    ],
+    missingInputs: [...base.missingInputs],
+  });
+}
+
 export function scoreBudgetMatch(context: ScoringContext): DimensionEvaluation {
   const { property, preferences } = context;
   if (property.source !== "manual") return unknown(context, "budget_match", ["真实用户录入的预期成交价"]);
-  const ratio = property.totalPrice / preferences.maximumBudget;
-  let score: number;
-  if (ratio <= 0.9) score = 100;
-  else if (ratio <= 1) score = linear(ratio, 0.9, 1, 100, 80);
-  else if (ratio <= 1.1) score = linear(ratio, 1, 1.1, 80, 20);
-  else if (ratio <= 1.2) score = linear(ratio, 1.1, 1.2, 20, 0);
-  else score = 0;
+  const score = calculateBudgetMatchScore(property.totalPrice, preferences.maximumBudget);
 
   return evaluation(context, "budget_match", {
-    score: Math.round(clamp(score)),
+    score,
     status: "known",
     evidence: [
       { source: "manual", quality: 0.8, description: `预期成交价 ${property.totalPrice} 万元` },
@@ -297,19 +338,23 @@ export function scoreMedicalAmenities(context: ScoringContext): DimensionEvaluat
 
 export function scoreBuildingAge(context: ScoringContext): DimensionEvaluation {
   const { property, asOfDate } = context;
-  if (property.source !== "manual" || property.deliveryYear === null || property.deliveryYear === undefined) {
+  if (property.source !== "manual") {
     return unknown(context, "building_age", ["交付年份"]);
   }
+  const verifiedWebYear = verifiedScoreableValue(webDimension(context, "building_age")?.verifiedEvidence, "completion_year");
+  const deliveryYear = property.deliveryYear ?? (typeof verifiedWebYear === "number" ? verifiedWebYear : undefined);
+  if (deliveryYear === undefined) return unknown(context, "building_age", ["交付年份"]);
   const asOfYear = Number(asOfDate.slice(0, 4));
-  if (!Number.isInteger(asOfYear) || property.deliveryYear < 1900 || property.deliveryYear > asOfYear + 3) {
+  if (!Number.isInteger(asOfYear) || !Number.isInteger(deliveryYear) || deliveryYear < 1900 || deliveryYear > asOfYear + 3) {
     return unknown(context, "building_age", ["有效的交付年份"]);
   }
-  const age = Math.max(0, asOfYear - property.deliveryYear);
+  const age = Math.max(0, asOfYear - deliveryYear);
   const score = age <= 5 ? 100 : age <= 10 ? 90 : age <= 15 ? 80 : age <= 20 ? 65 : age <= 30 ? 45 : 25;
+  const fromWeb = property.deliveryYear === null || property.deliveryYear === undefined;
   return evaluation(context, "building_age", {
     score,
-    status: "known",
-    evidence: [{ source: "manual", quality: 0.8, description: `${property.deliveryYear} 年交付，分析时楼龄约 ${age} 年` }],
+    status: fromWeb ? "partial" : "known",
+    evidence: [{ source: fromWeb ? "web" : "manual", quality: fromWeb ? 0.85 : 0.8, description: `${deliveryYear} 年交付，分析时楼龄约 ${age} 年${fromWeb ? "；年份来自已验证公开证据" : ""}` }],
     missingInputs: [],
   });
 }
@@ -628,5 +673,8 @@ export function evaluateDimensions(context: ScoringContext): DimensionEvaluation
     else result = scoreUnscoredDimension(context, key);
     evaluated.push(result);
   }
-  return evaluated;
+  // Apply user observations only after every base/derived dimension has been evaluated.
+  // This prevents an observation owned by community_quality from being counted again
+  // through the existing derived value_preservation dimension.
+  return evaluated.map((result) => applyUserReportedObservationScore(context, result));
 }

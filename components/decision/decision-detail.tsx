@@ -140,7 +140,7 @@ export function DecisionDetail({ propertyId }: { propertyId: string }) {
             // AMap evidence is optional; keep the base Decision Engine result.
           }
         });
-      void refreshWebEvidenceForProperties(properties, (updatedPropertyId, evidence) => {
+      void refreshWebEvidenceForProperties(properties, preferences.preferences, (updatedPropertyId, evidence) => {
         if (controller.signal.aborted) return;
         latestWebEvidence = { ...latestWebEvidence, [updatedPropertyId]: evidence };
         latestEngine = runDecisionEngine({

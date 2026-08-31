@@ -3,8 +3,7 @@ import {
   createAIAnalysisCorrectivePrompt,
   createAIAnalysisPrompt,
 } from "../../../../lib/ai/prompt";
-import { buildNarrativeFacts } from "../../../../lib/ai/narrative-facts";
-import { createDeterministicNarrative } from "../../../../lib/ai/deterministic-narrative";
+import { createDeterministicKnownNarrative } from "../../../../lib/ai/deterministic-narrative";
 import {
   runSingleRequestGeneration,
   shouldRetryAIAnalysisValidation,
@@ -78,12 +77,9 @@ export async function POST(request: Request): Promise<NextResponse<AIAnalysisRes
   }
 
   try {
-    const narrativeFacts = buildNarrativeFacts(requestValidation.data);
-    const factCount = narrativeFacts.requiredFacts.length
-      + narrativeFacts.comparisonFacts.length
-      + narrativeFacts.uncertaintyFacts.length
-      + narrativeFacts.nextStepFacts.length;
-    console.info(`[AI_ANALYZE] facts_built fact_count=${factCount} comparison_count=${narrativeFacts.comparisonFacts.length} uncertainty_count=${narrativeFacts.uncertaintyFacts.length}`);
+    const evidencePack = requestValidation.data.evidencePack;
+    const webEvidenceCount = evidencePack.candidates.reduce((count, candidate) => count + candidate.scoreableWebEvidence.length + candidate.contextualVerifiedEvidence.length, 0);
+    console.info(`[AI_ANALYZE] evidence_pack_built candidate_count=${evidencePack.candidates.length} dimension_count=${evidencePack.candidates.reduce((count, candidate) => count + candidate.dimensionResults.length, 0)} web_evidence_count=${webEvidenceCount}`);
     const validateGeneratedAnalysis = (analysis: unknown, model: string = getZhipuModel()) => validateAIAnalysisResponse(
       {
         ok: true,
@@ -109,19 +105,25 @@ export async function POST(request: Request): Promise<NextResponse<AIAnalysisRes
           score: dimension.score,
           status: dimension.status,
         })) ?? [],
+        evidencePack,
+        effectivePriorities: requestValidation.data.effectivePriorities,
+        knownDecisionContext: requestValidation.data.knownDecisionContext,
+        requireEvidenceGroundedStructure: model !== "deterministic-narrative-v1",
       },
     );
 
     const generation = await runSingleRequestGeneration({
-      initialPrompt: createAIAnalysisPrompt(requestValidation.data, narrativeFacts),
+      initialPrompt: createAIAnalysisPrompt(requestValidation.data),
       generate: (prompt) => generateAIAnalysis(prompt, { temperature: AI_NARRATIVE_TEMPERATURE }),
       validate: (analysis) => validateGeneratedAnalysis(analysis),
-      createCorrectivePrompt: (issues) => createAIAnalysisCorrectivePrompt(requestValidation.data, narrativeFacts, issues),
+      createCorrectivePrompt: (issues) => createAIAnalysisCorrectivePrompt(requestValidation.data, issues),
       shouldRetry: shouldRetryAIAnalysisValidation,
       onAttempt: logAttempt,
       buildFallback: () => {
+        const knownContext = requestValidation.data.knownDecisionContext;
+        console.info(`[AI_ANALYZE] fallback_context_built factor_count=${knownContext.decisiveKnownFactors.length} attention_count=${knownContext.attentionCandidates.length}`);
         const validation = validateGeneratedAnalysis(
-          createDeterministicNarrative(narrativeFacts),
+          createDeterministicKnownNarrative(knownContext),
           "deterministic-narrative-v1",
         );
         if (!validation.success) {

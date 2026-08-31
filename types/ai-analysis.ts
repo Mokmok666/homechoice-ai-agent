@@ -1,8 +1,11 @@
 import type { AnalysisConfidence, DimensionDataStatus, DimensionKey, Recommendation } from "./decision";
 import type { DecisionPriority, EducationNeed, EducationStage, PurchasePurpose, SelectableCommuteMode } from "./buyer-preferences";
 import type { AMapRouteMode, CommuteAvailabilityStatus, GeoEvidenceQuality, GeoEvidenceStatus } from "./geo-evidence";
+import type { DecisionEvidencePack } from "./decision-evidence-pack";
+import type { KnownDecisionContext } from "./known-decision-context";
+import type { NoiseExperienceLevel, SubjectiveQualityLevel } from "./property";
 
-export const AI_ANALYSIS_SCHEMA_VERSION = 2 as const;
+export const AI_ANALYSIS_SCHEMA_VERSION = 3 as const;
 export type AIAnalysisStatus = "idle" | "loading" | "completed" | "error" | "stale";
 
 export interface AIComparableTransactionContext { price: number; area: number; transactionDate: string; source: string }
@@ -23,6 +26,14 @@ export interface AIPropertyContext {
   supplementalInformation: {
     propertyCompany: string | null;
     propertyFee: number | null;
+    greenRatio: number | null;
+    parkingRatio: number | null;
+    propertyManagementExperience: SubjectiveQualityLevel;
+    publicAreaMaintenance: SubjectiveQualityLevel;
+    communityEnvironmentExperience: SubjectiveQualityLevel;
+    noiseExperience: NoiseExperienceLevel;
+    parkingExperience: SubjectiveQualityLevel;
+    maintenanceCondition: SubjectiveQualityLevel;
     propertyExperience: string | null;
     environment: string | null;
     noise: string | null;
@@ -203,6 +214,9 @@ export interface AIAnalysisRequest {
   locale: "zh-CN";
   inputSignature: string;
   context: AIAnalysisContext;
+  evidencePack: DecisionEvidencePack;
+  knownDecisionContext: KnownDecisionContext;
+  effectivePriorities: DecisionPriority[];
 }
 
 export interface AINarrativeFact {
@@ -245,6 +259,22 @@ export interface AIAnalysis {
   topPropertyId: string;
   topPropertyName: string;
   decisionSummary: string;
+  decisionFactors?: Array<{
+    dimensionId: DimensionKey;
+    priorityRank: 1 | 2 | 3 | null;
+    comparison: string;
+    verdict: string;
+    reasoning: string;
+  }>;
+  whyWinner?: string;
+  attentionItems?: string[];
+  topPriorityAnalysis?: Array<{
+    priority: DecisionPriority;
+    analysis: string;
+  }>;
+  tradeoff?: string;
+  additionalInsight?: string[];
+  risksOrUnknowns?: string[];
   pendingEvidence: string[];
   disclaimer: string;
 }

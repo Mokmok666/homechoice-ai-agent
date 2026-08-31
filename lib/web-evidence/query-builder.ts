@@ -1,5 +1,8 @@
 import type { Property } from "@/types/property";
+import type { DecisionPriority } from "@/types/buyer-preferences";
+import { getPriorityDimensions } from "@/lib/decision/weights";
 import type { WebEvidencePropertyIdentity, WebEvidenceQuery } from "./types";
+import { WEB_EVIDENCE_TARGET_DIMENSIONS, type WebEvidenceDimensionKey } from "./types";
 
 function clean(value: string | null | undefined): string {
   return value?.replace(/\s+/g, " ").trim() ?? "";
@@ -35,16 +38,40 @@ export function createPropertyIdentitySignature(identity: WebEvidencePropertyIde
   return `web-v2-${hash(JSON.stringify(stableIdentity))}`;
 }
 
-export function buildPropertyWebQueries(identity: WebEvidencePropertyIdentity): WebEvidenceQuery[] {
+function priorityOrder(topPriorities: readonly DecisionPriority[]): WebEvidenceDimensionKey[] {
+  const ordered = topPriorities.flatMap((priority) => getPriorityDimensions(priority))
+    .filter((key): key is WebEvidenceDimensionKey => WEB_EVIDENCE_TARGET_DIMENSIONS.includes(key as WebEvidenceDimensionKey));
+  return [...new Set(ordered)];
+}
+
+export function buildPropertyWebQueries(
+  identity: WebEvidencePropertyIdentity,
+  topPriorities: readonly DecisionPriority[] = [],
+): WebEvidenceQuery[] {
   const base = [identity.name, identity.city, identity.district].filter(Boolean).join(" ");
-  return [
+  const areaContext = identity.formattedAddress ? ` ${identity.formattedAddress}` : "";
+  const queries: WebEvidenceQuery[] = [
     { dimensionKey: "location_maturity", query: `${base} 板块 规划 周边配套` },
-    { dimensionKey: "location_maturity", query: `${base} 区域发展 交通 公共服务` },
-    { dimensionKey: "community_quality", query: `${base} 小区品质 开发商 项目交付` },
-    { dimensionKey: "property_management", query: `${base} 物业公司 物业服务 维护 投诉` },
+    { dimensionKey: "community_quality", query: `${base} 容积率 绿化率 户数 楼栋` },
+    { dimensionKey: "community_quality", query: `${base} 小区 户数 容积率 绿化率` },
+    { dimensionKey: "property_management", query: `${base} 物业公司 物业费` },
+    { dimensionKey: "property_management", query: `${base} 物业 服务` },
+    { dimensionKey: "building_age", query: `${base} 交付时间 建成年份 竣工` },
+    { dimensionKey: "building_age", query: `${base} 交房 年份` },
+    { dimensionKey: "layout_design", query: `${base}${areaContext} 户型 朝向 梯户比` },
     { dimensionKey: "education", query: `${base} 招生范围 对口学校 教育局` },
     { dimensionKey: "transaction_price_reasonableness", query: `${base} 二手房 成交 成交价` },
-    { dimensionKey: "liquidity", query: `${base} 二手房 真实成交 成交周期 近一年` },
+    { dimensionKey: "transaction_price_reasonableness", query: `${base} 近一年 成交价` },
+    { dimensionKey: "liquidity", query: `${base} 二手挂牌 成交 套数` },
+    { dimensionKey: "liquidity", query: `${base} 在售 二手房` },
     { dimensionKey: "value_preservation", query: `${base} 已建成 产业 交通 真实成交 区域现状` },
   ];
+  const preferred = priorityOrder(topPriorities);
+  const dimensionRank = new Map(preferred.map((dimension, index) => [dimension, index]));
+  return [...new Map(queries.map((item) => [`${item.dimensionKey}:${clean(item.query)}`, item])).values()]
+    .sort((left, right) => {
+      const leftRank = dimensionRank.get(left.dimensionKey) ?? preferred.length;
+      const rightRank = dimensionRank.get(right.dimensionKey) ?? preferred.length;
+      return leftRank - rightRank;
+    });
 }

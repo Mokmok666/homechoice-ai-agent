@@ -2,6 +2,7 @@ import type { BuyerPreferences } from "../../types/buyer-preferences";
 import type { EvidenceItem } from "../../types/decision";
 import type { Property } from "../../types/property";
 import { validateTextField } from "./dataQuality";
+import { NOISE_LABELS, QUALITY_LABELS } from "@/lib/decision-signals";
 
 function item(
   id: string,
@@ -34,6 +35,19 @@ export function buildEvidenceItems(
   }
   if (property.propertyFee !== null && property.propertyFee !== undefined && Number.isFinite(property.propertyFee) && property.propertyFee > 0) {
     evidence.push(item("property-fee", "物业费", "confirmed", `${property.propertyFee} 元/㎡/月`, "用户补充"));
+  }
+  if (property.greenRatio !== null && property.greenRatio !== undefined) evidence.push(item("green-ratio", "绿化率", "confirmed", `${property.greenRatio}%`, "用户录入的客观房源事实"));
+  if (property.parkingRatio !== null && property.parkingRatio !== undefined) evidence.push(item("parking-ratio", "车位配比", "confirmed", `${property.parkingRatio} 车位/户`, "用户录入的客观房源事实"));
+  const structuredObservations = [
+    ["property-management-experience", "物业服务体验", property.propertyManagementExperience, QUALITY_LABELS],
+    ["public-area-maintenance", "公共区域维护", property.publicAreaMaintenance, QUALITY_LABELS],
+    ["community-environment-experience", "小区环境体验", property.communityEnvironmentExperience, QUALITY_LABELS],
+    ["noise-experience", "噪音体验", property.noiseExperience, NOISE_LABELS],
+    ["parking-experience", "停车体验", property.parkingExperience, QUALITY_LABELS],
+    ["maintenance-condition", "整体维护状况", property.maintenanceCondition, QUALITY_LABELS],
+  ] as const;
+  for (const [id, title, value, labels] of structuredObservations) {
+    if (value && value !== "unknown") evidence.push(item(id, title, "confirmed", labels[value as keyof typeof labels], "用户记录的主观观察"));
   }
   if (hasValidText(property.propertyExperience)) {
     evidence.push(item("property-experience", "物业服务体验", "confirmed", property.propertyExperience!, "用户现场观察"));

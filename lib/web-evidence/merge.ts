@@ -5,6 +5,7 @@ import {
   type WebEvidenceDimensionKey,
 } from "./types";
 import type { DecisionEngineResult, DimensionEvaluation } from "@/types/decision";
+import { describeVerifiedEvidenceItem } from "./verified-evidence";
 
 function mergeDimension(dimension: DimensionEvaluation, propertyEvidence: PropertyWebEvidence | undefined): DimensionEvaluation {
   // Long-term value is derived from existing scored structural dimensions.
@@ -14,6 +15,10 @@ function mergeDimension(dimension: DimensionEvaluation, propertyEvidence: Proper
   if (!web || web.status === "unavailable" || web.facts.length === 0) return dimension;
   const quality = web.status === "verified" ? 0.85 : 0.6;
   const descriptions = [web.interpretation?.conclusion ?? web.summary].filter((item): item is string => Boolean(item));
+  const structuredDescriptions = (web.verifiedEvidence ?? [])
+    .map(describeVerifiedEvidenceItem)
+    .filter((item): item is string => item !== null)
+    .slice(0, 3);
   return {
     ...dimension,
     // Web facts enrich evidence only. Without an approved scorer, score and all ranking fields remain untouched.
@@ -21,6 +26,7 @@ function mergeDimension(dimension: DimensionEvaluation, propertyEvidence: Proper
     evidence: [
       ...dimension.evidence,
       ...descriptions.map((description) => ({ source: "web" as const, quality, description })),
+      ...structuredDescriptions.map((description) => ({ source: "web" as const, quality, description })),
     ],
   };
 }

@@ -2,19 +2,18 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowRight, Check, ChevronDown, CircleAlert, Database, Save, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, ChevronDown, Save } from "lucide-react";
 import { AIAnalysisPanel } from "@/components/ai/ai-analysis-panel";
 import { Button } from "@/components/ui/button";
 import { useSupabaseAuth } from "@/components/providers/supabase-auth-provider";
 import { findAIAnalysisBySignature } from "@/lib/ai-analysis-storage";
 import { refreshGeoEvidenceForProperties } from "@/lib/amap/evidence-client";
-import { projectAIAnalysisContext } from "@/lib/ai/input";
-import { createAIInputSignature } from "@/lib/ai/signature";
+import { createAIAnalysisRequest } from "@/lib/ai/request";
 import { BUYER_PREFERENCES_STORAGE_KEY } from "@/lib/buyer-preferences-storage";
 import { DEMO_ACTIVE_STORAGE_KEY, DEMO_PREFERENCES_STORAGE_KEY, getEffectiveBuyerPreferences, getEffectiveProperties } from "@/lib/demo/demo-mode";
 import { runDecisionEngine } from "@/lib/decision/engine";
 import { generateDecisionReasons } from "@/lib/decision/reason-generator";
-import { buildDecisionRisks, buildDecisionSummary, buildQuickComparison } from "@/lib/decision-presentation";
+import { buildDecisionSummary, buildQuickComparison } from "@/lib/decision-presentation";
 import { savePersistedDecisionHistory } from "@/lib/decision-history-storage";
 import { GEO_EVIDENCE_STORAGE_KEY, loadCachedGeoEvidenceForProperties } from "@/lib/geo-evidence-storage";
 import { PROPERTY_STORAGE_KEY } from "@/lib/property-storage";
@@ -53,8 +52,7 @@ function getAIOverallSummary(
   webEvidenceByProperty: WebEvidenceByProperty,
 ): string | null {
   if (engine.ranking.length === 0) return null;
-  const context = projectAIAnalysisContext({ properties, preferences, engine, geoEvidenceByProperty, webEvidenceByProperty });
-  const inputSignature = createAIInputSignature(context);
+  const inputSignature = createAIAnalysisRequest({ properties, preferences, engine, geoEvidenceByProperty, webEvidenceByProperty }).inputSignature;
   const cached = findAIAnalysisBySignature(engine.ranking[0], inputSignature, engine.engineVersion);
   return cached?.analysis.decisionSummary ?? null;
 }
@@ -163,7 +161,7 @@ export function DecisionResults() {
             // External evidence is optional; the deterministic base result remains visible.
           }
         });
-      void refreshWebEvidenceForProperties(manualProperties, (propertyId, evidence) => {
+      void refreshWebEvidenceForProperties(manualProperties, preferencesResult.preferences, (propertyId, evidence) => {
         if (geoController.signal.aborted) return;
         latestWebEvidence = { ...latestWebEvidence, [propertyId]: evidence };
         const engineWithWebEvidence = mergeWebEvidenceIntoEngine(runDecisionEngine({
@@ -264,13 +262,6 @@ export function DecisionResults() {
     geoEvidenceByProperty: state.geoEvidenceByProperty,
   }) : [];
   const decisionSummary = buildDecisionSummary(winningReasons);
-  const decisionRisks = winnerProperty && state.preferences ? buildDecisionRisks({
-    property: winnerProperty,
-    result: winner,
-    preferences: state.preferences,
-    geoEvidenceByProperty: state.geoEvidenceByProperty,
-    webEvidenceByProperty: state.webEvidenceByProperty,
-  }) : [];
   const comparisons = buildQuickComparison(state.properties, state.engine.results, state.geoEvidenceByProperty, state.preferences ?? undefined);
 
   return (
@@ -298,9 +289,9 @@ export function DecisionResults() {
             {winnerProperty.listingPrice && <p className="mt-3 text-[13px] leading-5 text-[#777b74]">挂牌与预期成交相差约 {Math.abs(Math.round(winnerProperty.listingPrice - winnerProperty.totalPrice))} 万元（{Math.abs(((winnerProperty.listingPrice - winnerProperty.totalPrice) / winnerProperty.listingPrice) * 100).toFixed(1)}%），仅为当前决策假设差额。</p>}
           </div>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-[#ebe8e0] px-6 py-4 text-[13px] text-[#7a7d77] sm:px-8">
-            <span>当前信息完整度 {winner.confidence.dataCompletenessPercent}%</span>
-            <span>公开证据 {winnerExternalCoverage.completed}/{winnerExternalCoverage.total}</span>
-            <span>分析可信度 {winner.confidence.analysisConfidence === "supported" ? "较充分" : "阶段性"}</span>
+            <span>已确认信息 {winner.confidence.dataCompletenessPercent}%</span>
+            <span>外部证据覆盖 {winnerExternalCoverage.completed}/{winnerExternalCoverage.total}</span>
+            <span>本次判断 {state.engine.effectiveComparableDimensions?.length ?? 0} 个可比维度</span>
             <span>分析日期 {state.engine.asOfDate}</span>
             {state.engine.rankingProvisional && <span className="rounded-full bg-[#efe8d9] px-3 py-1 text-[#806b3e]">阶段性排序</span>}
           </div>
@@ -319,8 +310,6 @@ export function DecisionResults() {
           {comparisons.map((item) => <ComparisonCard key={item.property.id} item={item} />)}
         </div>
       </section>
-
-      {decisionRisks.length > 0 && winnerProperty && <section className="card mt-6 p-6 sm:p-7"><SectionHeading eyebrow="Before buying" title="买之前还需要确认" description="补充这些事实可以提高判断可信度，但不会阻止当前推荐。" /><div className="mt-5 grid gap-3 md:grid-cols-2">{decisionRisks.map((risk) => <article key={risk.title} className="rounded-xl bg-[#faf8f3] p-4"><div className="flex gap-3"><CircleAlert size={18} className="mt-0.5 shrink-0 text-[#8a7046]" /><div><h3 className="text-base font-semibold">{risk.title}</h3><p className="mt-1 text-sm leading-6 text-[#74766f]">{risk.description}</p><ul className="mt-2 space-y-1 text-sm leading-6 text-[#696c67]">{risk.suggestions.map((suggestion) => <li key={suggestion}>· {suggestion}</li>)}</ul><Button asChild className="mt-3 h-9 bg-white px-3 text-sm text-[#5d7056] ring-1 ring-[#dcdad4] hover:bg-[#f3f4ef]"><Link href={`/properties/new?id=${winnerProperty.id}#${risk.focusTarget}`}>补充信息</Link></Button></div></div></article>)}</div></section>}
 
       <details className="card group mt-6 p-6 sm:p-7">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-4"><div><p className="text-xs font-medium uppercase tracking-[0.16em] text-[#75886d]">Detailed evidence</p><h2 className="mt-1 font-serif text-2xl">查看完整 15 维分析</h2><p className="mt-2 text-sm leading-6 text-[#7b7e78]">按房源查看全部维度、证据来源、权重与仍需确认的信息。</p></div><ChevronDown className="shrink-0 text-[#75886d] transition group-open:rotate-180" /></summary>

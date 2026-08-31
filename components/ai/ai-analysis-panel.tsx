@@ -3,13 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, LoaderCircle, RefreshCcw, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { StructuredNarrative } from "@/components/ai/structured-narrative";
 import { findAIAnalysisBySignature, findLatestAIAnalysisForProperty, saveAIAnalysisRecord } from "@/lib/ai-analysis-storage";
 import { requestAIAnalysis, shouldApplyAIAnalysisResponse } from "@/lib/ai/client";
-import { projectAIAnalysisContext } from "@/lib/ai/input";
-import { createAIInputSignature } from "@/lib/ai/signature";
+import { createAIAnalysisRequest } from "@/lib/ai/request";
 import { RECOMMENDATION_BADGE_STYLES, RECOMMENDATION_LABELS } from "@/lib/recommendation-presentation";
-import { AI_ANALYSIS_SCHEMA_VERSION, type AIAnalysis, type AIAnalysisRequest } from "@/types/ai-analysis";
+import type { AIAnalysis, AIAnalysisRequest } from "@/types/ai-analysis";
 import type { BuyerPreferences } from "@/types/buyer-preferences";
 import type { DecisionPriority } from "@/types/buyer-preferences";
 import type { DecisionEngineResult } from "@/types/decision";
@@ -27,9 +25,9 @@ interface AIAnalysisPanelProps {
 
 type PanelState =
   | { status: "idle" }
-  | { status: "loading"; analysis?: AIAnalysis }
-  | { status: "stale"; analysis: AIAnalysis }
-  | { status: "success"; analysis: AIAnalysis; warning?: string }
+  | { status: "loading" }
+  | { status: "stale" }
+  | { status: "success"; analysis: AIAnalysis }
   | { status: "error"; message: string };
 
 const PRIORITY_LABELS: Record<DecisionPriority, string> = {
@@ -54,13 +52,7 @@ function buildRequest(
   webEvidenceByProperty: WebEvidenceByProperty,
 ): AIAnalysisRequest | null {
   if (engine.ranking.length === 0) return null;
-  const context = projectAIAnalysisContext({ properties, preferences, engine, geoEvidenceByProperty, webEvidenceByProperty });
-  return {
-    schemaVersion: AI_ANALYSIS_SCHEMA_VERSION,
-    locale: "zh-CN",
-    inputSignature: createAIInputSignature(context),
-    context,
-  };
+  return createAIAnalysisRequest({ properties, preferences, engine, geoEvidenceByProperty, webEvidenceByProperty });
 }
 
 export function AIAnalysisPanel({ properties, preferences, engine, geoEvidenceByProperty, webEvidenceByProperty }: AIAnalysisPanelProps) {
@@ -88,7 +80,7 @@ export function AIAnalysisPanel({ properties, preferences, engine, geoEvidenceBy
     const cached = findAIAnalysisBySignature(topPropertyId, currentRequest.inputSignature, engine.engineVersion);
     if (cached) { setState({ status: "success", analysis: cached.analysis }); return; }
     const previous = findLatestAIAnalysisForProperty(topPropertyId);
-    setState(previous ? { status: "stale", analysis: previous.analysis } : { status: "idle" });
+    setState(previous ? { status: "stale" } : { status: "idle" });
   }, [engine.engineVersion, requestIdentity, topPropertyId]);
 
   useEffect(() => () => abortControllerRef.current?.abort(), []);
@@ -106,10 +98,7 @@ export function AIAnalysisPanel({ properties, preferences, engine, geoEvidenceBy
     generationRef.current = generation;
     const controller = new AbortController();
     abortControllerRef.current = controller;
-    const analysisWhileLoading = state.status === "success" || state.status === "stale" || state.status === "loading"
-      ? state.analysis
-      : findLatestAIAnalysisForProperty(topPropertyId)?.analysis;
-    setState({ status: "loading", analysis: analysisWhileLoading });
+    setState({ status: "loading" });
 
     try {
       const response = await requestAIAnalysis(request, { signal: controller.signal });
@@ -122,12 +111,7 @@ export function AIAnalysisPanel({ properties, preferences, engine, geoEvidenceBy
         topPropertyId,
       })) {
         if (controller.signal.aborted || generationRef.current !== generation) return;
-        const previous = findLatestAIAnalysisForProperty(topPropertyId);
-        if (previous) {
-          setState({ status: "success", analysis: previous.analysis, warning: "暂时无法更新解读，当前仍显示上一次有效结果。" });
-        } else {
-          setState({ status: "error", message: "AI解读暂时不可用，当前评分和排序结果仍然有效。" });
-        }
+        setState({ status: "error", message: "AI解读暂时不可用，当前评分和排序结果仍然有效。" });
         return;
       }
       if (!response.ok) return;
@@ -149,9 +133,7 @@ export function AIAnalysisPanel({ properties, preferences, engine, geoEvidenceBy
 
   const isLoading = state.status === "loading";
   const buttonLabel = getAIButtonLabel(state);
-  const visibleAnalysis = state.status === "success" || state.status === "stale" || state.status === "loading"
-    ? state.analysis
-    : undefined;
+  const visibleAnalysis = state.status === "success" ? state.analysis : undefined;
 
   return (
     <section className="card mt-7 overflow-hidden" aria-live="polite">
@@ -173,6 +155,7 @@ export function AIAnalysisPanel({ properties, preferences, engine, geoEvidenceBy
       </div>
 
       {state.status === "idle" && <div className="p-6 text-[15px] leading-7 text-[#747772] sm:p-7">AI 将结合购房偏好、全部候选、15维结果以及当前高德地图与通勤证据，解释现有阶段性排序。</div>}
+      {state.status === "stale" && <div className="p-6 text-[15px] leading-7 text-[#747772] sm:p-7">房源或偏好已变化，请重新生成AI解读。</div>}
       {state.status === "loading" && (
         <div className="p-6 sm:p-7"><div className="mx-auto max-w-xl rounded-2xl border border-[#e4e8e0] bg-[#f8faf6] p-5 sm:p-6">
           <div className="flex items-center gap-3 text-[#5f7258]"><LoaderCircle className="animate-spin" size={20} /><p className="font-medium">正在生成AI购房解读</p></div>
@@ -192,12 +175,7 @@ export function AIAnalysisPanel({ properties, preferences, engine, geoEvidenceBy
           deterministicTopName={topCandidate.property.name ?? "当前首选房源"}
           matchScore={topCandidate.decision.matchScore}
           recommendation={topCandidate.decision.recommendation}
-          topPriorities={request?.context.preferences.topPriorities ?? preferences.topPriorities}
-          warning={state.status === "stale"
-            ? "当前解读基于之前的房源或偏好信息，更新后可获得最新判断。"
-            : state.status === "loading"
-              ? "正在更新解读，当前仍显示上一次有效结果。"
-              : state.status === "success" ? state.warning : undefined}
+          topPriorities={preferences.topPriorities.filter((priority) => preferences.educationNeed !== "none" || priority !== "education")}
         />
       )}
     </section>
@@ -206,7 +184,7 @@ export function AIAnalysisPanel({ properties, preferences, engine, geoEvidenceBy
 
 export function getAIButtonLabel(state: PanelState): "生成AI解读" | "重新生成" | "更新AI解读" | "正在生成..." | "重新尝试" {
   if (state.status === "loading") return "正在生成...";
-  if (state.status === "error" || (state.status === "success" && state.warning)) return "重新尝试";
+  if (state.status === "error") return "重新尝试";
   if (state.status === "stale") return "更新AI解读";
   if (state.status === "success") return "重新生成";
   return "生成AI解读";
@@ -218,20 +196,20 @@ function AnalysisContent({
   matchScore,
   recommendation,
   topPriorities,
-  warning,
 }: {
   analysis: AIAnalysis;
   deterministicTopName: string;
   matchScore: number | null;
   recommendation: "CONSIDER" | "WAIT" | "PASS";
   topPriorities: DecisionPriority[];
-  warning?: string;
 }) {
   const recommendationLabel = RECOMMENDATION_LABELS[recommendation];
-  const decisionSummary = analysis.decisionSummary.replace(/^\s*推荐结论\s*[：:]\s*/, "");
+  const decisionSummary = analysis.decisionSummary
+    .replace(/^\s*推荐结论\s*[：:]\s*/, "")
+    .replace(/\s+/g, " ")
+    .trim();
   return (
     <div className="space-y-5 p-6 sm:p-7">
-      {warning && <div className="flex items-start gap-3 rounded-xl border border-[#eadfca] bg-[#faf6ed] p-4 text-sm text-[#78684a]"><AlertTriangle className="mt-0.5 shrink-0" size={18} /><p>{warning}</p></div>}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="font-serif text-xl">最适合您的房源：{deterministicTopName}</h3>
         <div className="flex items-center gap-2 text-xs">
@@ -240,17 +218,11 @@ function AnalysisContent({
         </div>
       </div>
       <div className="flex flex-wrap gap-2 text-[13px] text-[#667061]"><span className="py-1.5">您当前最关注：</span>{topPriorities.map((priority, index) => <span key={priority} className="rounded-full bg-[#f3f5f0] px-3 py-1.5">{index + 1}. {PRIORITY_LABELS[priority]}</span>)}</div>
-      <div className="rounded-xl bg-[#faf9f6] p-4 sm:p-5"><h4 className="text-base font-semibold text-[#5d6658]">推荐结论</h4><StructuredNarrative value={decisionSummary} className="mt-3 leading-[1.78]" /></div>
-      {analysis.pendingEvidence.length > 0 && <AnalysisList title="建议下一步确认" items={analysis.pendingEvidence} />}
-      <p className="text-[13px] leading-5 text-[#8a8c87]">{analysis.disclaimer}</p>
+      <p className="rounded-xl bg-[#faf9f6] p-4 text-[15px] leading-[1.78] text-[#686d65] sm:p-5 sm:text-base">{decisionSummary}</p>
     </div>
   );
 }
 
 function LoadingStep({ complete = false, text }: { complete?: boolean; text: string }) {
   return <li className="flex items-center gap-3">{complete ? <span className="grid size-5 place-items-center rounded-full bg-[#718169] text-white"><Check size={13} /></span> : <LoaderCircle className="animate-spin text-[#718169]" size={20} />}<span>{text}</span></li>;
-}
-
-function AnalysisList({ title, items }: { title: string; items: string[] }) {
-  return <div className="rounded-xl bg-[#f7f6f2] p-4 text-[#626560]"><h4 className="text-base font-semibold">{title}</h4><ul className="mt-3 flex flex-wrap gap-2 text-sm leading-5">{items.map((text) => <li key={text} className="rounded-full bg-white px-3 py-1.5">{text}</li>)}</ul></div>;
 }

@@ -14,6 +14,7 @@ import {
   type WebEvidenceInterpretation,
 } from "@/lib/web-evidence/types";
 import type { Property } from "@/types/property";
+import { buildVerifiedEvidenceItems } from "@/lib/web-evidence/verified-evidence";
 
 export const WEB_EVIDENCE_STORAGE_KEY = "homechoice.web-evidence.v1";
 export const WEB_EVIDENCE_TTL_MS = 48 * 60 * 60 * 1000;
@@ -46,7 +47,7 @@ function parseInterpretation(value: unknown): WebEvidenceInterpretation | null {
   return { conclusion: value.conclusion.trim(), supportingFacts: value.supportingFacts.map((item) => item.trim()), generatedAt: value.generatedAt };
 }
 
-function parseDimension(value: unknown): DimensionWebEvidence | null {
+function parseDimension(value: unknown, propertyId: string): DimensionWebEvidence | null {
   if (!isRecord(value) || !WEB_EVIDENCE_TARGET_DIMENSIONS.includes(value.dimensionKey as never) || !["verified", "partial", "unavailable"].includes(String(value.status)) || !Array.isArray(value.facts)) return null;
   const facts = value.facts.map(parseFact).filter((fact): fact is WebEvidenceFact => fact !== null);
   const dimensionKey = value.dimensionKey as DimensionWebEvidence["dimensionKey"];
@@ -58,13 +59,14 @@ function parseDimension(value: unknown): DimensionWebEvidence | null {
     // Rebuild the concise presentation summary so legacy verbose/generic cache remains readable.
     summary: buildDimensionWebEvidenceSummary(dimensionKey, status, facts),
     facts,
+    verifiedEvidence: buildVerifiedEvidenceItems(propertyId, dimensionKey, facts),
     ...(interpretation ? { interpretation } : {}),
   };
 }
 
 function parseEvidence(value: unknown): PropertyWebEvidence | null {
   if (!isRecord(value) || value.version !== WEB_EVIDENCE_VERSION || typeof value.propertyId !== "string" || typeof value.propertyIdentitySignature !== "string" || typeof value.fetchedAt !== "string" || !Array.isArray(value.dimensions)) return null;
-  const dimensions = value.dimensions.map(parseDimension).filter((item): item is DimensionWebEvidence => item !== null);
+  const dimensions = value.dimensions.map((dimension) => parseDimension(dimension, value.propertyId as string)).filter((item): item is DimensionWebEvidence => item !== null);
   if (dimensions.length !== WEB_EVIDENCE_TARGET_DIMENSIONS.length) return null;
   const baseEvidence: PropertyWebEvidence = {
     propertyId: value.propertyId,

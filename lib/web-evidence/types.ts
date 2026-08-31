@@ -1,13 +1,15 @@
 import type { DimensionKey } from "@/types/decision";
 
-export const WEB_EVIDENCE_VERSION = 2 as const;
+export const WEB_EVIDENCE_VERSION = 3 as const;
 export const WEB_EVIDENCE_PROVIDER_ID = "tavily-search-v1" as const;
 export const WEB_EVIDENCE_LEGACY_PROVIDER_ID = "zhipu-web-search-v2" as const;
-export const WEB_EVIDENCE_INTERPRETATION_VERSION = 2 as const;
+export const WEB_EVIDENCE_INTERPRETATION_VERSION = 3 as const;
 export const WEB_EVIDENCE_TARGET_DIMENSIONS = [
   "location_maturity",
   "community_quality",
   "property_management",
+  "building_age",
+  "layout_design",
   "education",
   "transaction_price_reasonableness",
   "liquidity",
@@ -19,6 +21,39 @@ export type WebEvidenceProviderId = typeof WEB_EVIDENCE_PROVIDER_ID | typeof WEB
 export type WebEvidenceConfidence = "high" | "medium" | "low";
 export type WebEvidenceStatus = "verified" | "partial" | "unavailable";
 export type TransactionEvidenceKind = "transaction" | "listing" | "unknown";
+export type EvidenceKind = "scoreable" | "contextual";
+export type EvidenceVerificationStatus = "verified" | "partially_verified" | "conflicting" | "insufficient";
+export type EvidenceSourceTier = "A" | "B" | "C" | "D";
+
+export interface VerifiedEvidenceSource {
+  sourceType: "web";
+  sourceTitle: string;
+  sourceUrl: string;
+  sourceDomain?: string;
+  sourceDate?: string;
+  retrievedAt: string;
+  tier: EvidenceSourceTier;
+}
+
+export interface VerifiedEvidenceItem {
+  propertyId: string;
+  dimension: WebEvidenceDimensionKey;
+  key: string;
+  value: string | number;
+  unit?: string;
+  normalizedValue?: string | number;
+  evidenceKind: EvidenceKind;
+  sourceType: "web";
+  sourceTitle?: string;
+  sourceUrl?: string;
+  sourceDomain?: string;
+  sourceDate?: string;
+  retrievedAt: string;
+  confidence: WebEvidenceConfidence;
+  corroborationCount: number;
+  status: EvidenceVerificationStatus;
+  sources: VerifiedEvidenceSource[];
+}
 
 export interface NormalizedWebSearchResult {
   title: string;
@@ -53,6 +88,7 @@ export interface DimensionWebEvidence {
   status: WebEvidenceStatus;
   summary?: string;
   facts: WebEvidenceFact[];
+  verifiedEvidence?: VerifiedEvidenceItem[];
   interpretation?: WebEvidenceInterpretation;
 }
 

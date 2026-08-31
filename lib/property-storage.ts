@@ -2,6 +2,8 @@ import {
   FLOOR_LEVELS,
   ORIENTATIONS,
   PROPERTY_STATUSES,
+  SUBJECTIVE_QUALITY_LEVELS,
+  NOISE_EXPERIENCE_LEVELS,
   type Property,
   type ComparableTransaction,
   type ConfirmedPropertyLocation,
@@ -9,6 +11,8 @@ import {
   type Orientation,
   type PropertyInput,
   type PropertyStatus,
+  type SubjectiveQualityLevel,
+  type NoiseExperienceLevel,
 } from "@/types/property";
 import {
   deleteCloudProperty,
@@ -22,6 +26,8 @@ export const MAX_PROPERTIES = 5;
 const statusSet = new Set<PropertyStatus>(PROPERTY_STATUSES);
 const floorLevelSet = new Set<FloorLevel>(FLOOR_LEVELS);
 const orientationSet = new Set<Orientation>(ORIENTATIONS);
+const subjectiveQualitySet = new Set<SubjectiveQualityLevel>(SUBJECTIVE_QUALITY_LEVELS);
+const noiseExperienceSet = new Set<NoiseExperienceLevel>(NOISE_EXPERIENCE_LEVELS);
 
 const legacyOrientationMap: Record<string, Orientation> = {
   "南向": "south",
@@ -50,6 +56,22 @@ function optionalPositiveInteger(value: unknown): number | null {
 
 function optionalPositiveNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function optionalNonNegativeNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function subjectiveQuality(value: unknown): SubjectiveQualityLevel {
+  return typeof value === "string" && subjectiveQualitySet.has(value as SubjectiveQualityLevel)
+    ? value as SubjectiveQualityLevel
+    : "unknown";
+}
+
+function noiseExperience(value: unknown): NoiseExperienceLevel {
+  return typeof value === "string" && noiseExperienceSet.has(value as NoiseExperienceLevel)
+    ? value as NoiseExperienceLevel
+    : "unknown";
 }
 
 function optionalText(value: unknown): string | null {
@@ -164,6 +186,14 @@ function normalizeProperty(value: unknown): Property | null {
     : null;
   normalized.propertyCompany = optionalText(property.propertyCompany) ?? optionalText(property.propertyManagementInformation);
   normalized.propertyFee = optionalPositiveNumber(property.propertyFee);
+  normalized.greenRatio = optionalNonNegativeNumber(property.greenRatio);
+  normalized.parkingRatio = optionalNonNegativeNumber(property.parkingRatio);
+  normalized.propertyManagementExperience = subjectiveQuality(property.propertyManagementExperience);
+  normalized.publicAreaMaintenance = subjectiveQuality(property.publicAreaMaintenance);
+  normalized.communityEnvironmentExperience = subjectiveQuality(property.communityEnvironmentExperience);
+  normalized.noiseExperience = noiseExperience(property.noiseExperience);
+  normalized.parkingExperience = subjectiveQuality(property.parkingExperience);
+  normalized.maintenanceCondition = subjectiveQuality(property.maintenanceCondition);
   normalized.propertyExperience = optionalText(property.propertyExperience);
   normalized.environment = optionalText(property.environment);
   normalized.noise = optionalText(property.noise);

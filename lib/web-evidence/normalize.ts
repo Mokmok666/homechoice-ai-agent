@@ -6,6 +6,7 @@ import type {
   WebEvidenceDimensionKey,
   WebEvidenceFact,
 } from "./types";
+import { buildVerifiedEvidenceItems } from "./verified-evidence";
 
 const MEDIUM_DOMAINS = ["ke.com", "fang.com", "anjuke.com", "58.com", "leju.com", "jiwu.com", "thepaper.cn", "caixin.com", "yicai.com"];
 const LOW_SOURCE_PATTERN = /论坛|贴吧|问答|个人博客|自媒体|业主群|匿名/i;
@@ -89,6 +90,14 @@ export function buildDimensionWebEvidenceSummary(
       return verified
         ? "公开资料可确认物业公司或服务相关信息，但真实服务质量仍需结合住户体验核验。"
         : "现有公开资料提供了物业相关线索，但缺少稳定服务评价，暂不对物业品质作强判断。";
+    case "building_age":
+      return verified
+        ? "公开资料包含可核验的交付、竣工或建成年份信息；仅在结构化年份通过验证后用于楼龄计算。"
+        : "现有公开资料仅提供部分建成或交付时间线索，尚不足以确认楼龄。";
+    case "layout_design":
+      return verified
+        ? "公开资料包含户型结构事实，但面积和房间数本身不等同于户型设计更优。"
+        : "现有公开资料仅提供部分户型线索，尚不足以判断实际户型设计。";
     case "education":
       return verified
         ? "公开资料包含招生或学校服务范围线索，但具体入学资格仍须以当年官方政策核验。"
@@ -109,6 +118,7 @@ export function buildDimensionWebEvidenceSummary(
 }
 
 export function normalizeDimensionWebEvidence(
+  propertyId: string,
   dimensionKey: WebEvidenceDimensionKey,
   results: NormalizedWebSearchResult[],
 ): DimensionWebEvidence {
@@ -121,10 +131,12 @@ export function normalizeDimensionWebEvidence(
     return fact ? [fact] : [];
   }).slice(0, 6);
   const status = evidenceStatus(facts);
+  const verifiedEvidence = buildVerifiedEvidenceItems(propertyId, dimensionKey, facts);
   return {
     dimensionKey,
     status,
     summary: buildDimensionWebEvidenceSummary(dimensionKey, status, facts),
     facts,
+    verifiedEvidence,
   };
 }

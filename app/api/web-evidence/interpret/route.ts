@@ -18,6 +18,16 @@ function errorResponse(
   return NextResponse.json({ ok: false, error: { code, message, retryable } }, { status });
 }
 
+function parseJsonObject(raw: string): unknown | null {
+  const trimmed = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  try { return JSON.parse(trimmed) as unknown; } catch {
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start < 0 || end <= start) return null;
+    try { return JSON.parse(trimmed.slice(start, end + 1)) as unknown; } catch { return null; }
+  }
+}
+
 export async function POST(request: Request): Promise<NextResponse<WebEvidenceInterpretationApiResponse>> {
   let body: unknown;
   try { body = await request.json(); } catch { return errorResponse("INVALID_REQUEST", "请求内容必须是有效 JSON。", false, 400); }
@@ -27,10 +37,16 @@ export async function POST(request: Request): Promise<NextResponse<WebEvidenceIn
   if (usableDimensions.length === 0) return errorResponse("INVALID_REQUEST", "当前没有可解释的公开证据。", false, 400);
   try {
     const raw = await generateAIAnalysis(createWebEvidenceInterpretationPrompt(requestValidation.data));
-    let parsed: unknown;
-    try { parsed = JSON.parse(raw) as unknown; } catch { return errorResponse("INVALID_AI_OUTPUT", "公开证据解释无法安全解析。", false, 422); }
+    const parsed = parseJsonObject(raw);
+    if (parsed === null) {
+      console.warn("[WEB_INTERPRET] parse_failed");
+      return errorResponse("INVALID_AI_OUTPUT", "公开证据解释无法安全解析。", false, 422);
+    }
     const outputValidation = validateWebEvidenceInterpretationOutput(parsed, requestValidation.data);
-    if (!outputValidation.success) return errorResponse("INVALID_AI_OUTPUT", "公开证据解释未通过安全校验。", false, 422);
+    if (!outputValidation.success) {
+      console.warn(`[WEB_INTERPRET] validation_failed issue_count=${outputValidation.errors.length}`);
+      return errorResponse("INVALID_AI_OUTPUT", "公开证据解释未通过安全校验。", false, 422);
+    }
     return NextResponse.json({
       ...outputValidation.data,
       metadata: { provider: "zhipu", model: getZhipuModel(), generatedAt: new Date().toISOString() },

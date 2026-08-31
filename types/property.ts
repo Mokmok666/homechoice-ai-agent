@@ -33,6 +33,11 @@ export const ORIENTATIONS = [
 export type FloorLevel = (typeof FLOOR_LEVELS)[number];
 export type Orientation = (typeof ORIENTATIONS)[number];
 
+export const SUBJECTIVE_QUALITY_LEVELS = ["very_poor", "poor", "average", "good", "very_good", "unknown"] as const;
+export const NOISE_EXPERIENCE_LEVELS = ["severe", "noticeable", "occasional", "low", "minimal", "unknown"] as const;
+export type SubjectiveQualityLevel = (typeof SUBJECTIVE_QUALITY_LEVELS)[number];
+export type NoiseExperienceLevel = (typeof NOISE_EXPERIENCE_LEVELS)[number];
+
 export interface ComparableTransaction {
   id: string;
   price: number;
@@ -78,6 +83,15 @@ export interface Property {
   propertyManagementInformation: string;
   propertyCompany?: string | null;
   propertyFee?: number | null;
+  greenRatio?: number | null;
+  parkingRatio?: number | null;
+  propertyManagementExperience?: SubjectiveQualityLevel;
+  publicAreaMaintenance?: SubjectiveQualityLevel;
+  communityEnvironmentExperience?: SubjectiveQualityLevel;
+  noiseExperience?: NoiseExperienceLevel;
+  parkingExperience?: SubjectiveQualityLevel;
+  maintenanceCondition?: SubjectiveQualityLevel;
+  /** Legacy free-text observations retained as contextual notes. */
   propertyExperience?: string | null;
   environment?: string | null;
   noise?: string | null;
@@ -120,6 +134,14 @@ export type PropertyInput = Pick<
   | "propertyManagementInformation"
   | "propertyCompany"
   | "propertyFee"
+  | "greenRatio"
+  | "parkingRatio"
+  | "propertyManagementExperience"
+  | "publicAreaMaintenance"
+  | "communityEnvironmentExperience"
+  | "noiseExperience"
+  | "parkingExperience"
+  | "maintenanceCondition"
   | "propertyExperience"
   | "environment"
   | "noise"

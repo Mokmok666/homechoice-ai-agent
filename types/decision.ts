@@ -28,6 +28,7 @@ export type EvidenceStatus = "confirmed" | "ai_inferred" | "optional_confirmatio
 export type EvidenceSource =
   | "buyer_preference"
   | "manual"
+  | "user_reported"
   | "confirmed_comparable"
   | "amap"
   | "web"
@@ -132,9 +133,14 @@ export interface DecisionEngineInput {
 }
 
 export interface DecisionEngineResult {
-  engineVersion: "decision-engine-v1" | "decision-engine-v2" | "decision-engine-v2.1";
+  engineVersion: "decision-engine-v1" | "decision-engine-v2" | "decision-engine-v2.1" | "decision-engine-v2.2" | "decision-engine-v2.3";
   asOfDate: string;
+  /** Shared effective weights used by every candidate in this comparison. */
   weights: Record<DimensionKey, number>;
+  /** User-intended personalized weights before evidence comparability is applied. */
+  intendedWeights?: Record<DimensionKey, number>;
+  /** Ordinary dimensions for which every active candidate has a legitimate score. */
+  effectiveComparableDimensions?: DimensionKey[];
   results: PropertyDecisionResult[];
   ranking: string[];
   rankingProvisional: boolean;
