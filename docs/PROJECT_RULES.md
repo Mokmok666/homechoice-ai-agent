@@ -1,5 +1,7 @@
 # HomeChoice 项目开发规则
 
+> **历史文档说明：** 本文件记录项目早期的开发约束与产品边界。当前已发布能力和架构以 [README](../README.md)、[Case Study](./CASE_STUDY.md)、[Architecture](./ARCHITECTURE.md) 及实际代码为准；其中仍适用的安全边界继续有效。
+
 本文件是 HomeChoice 的 AI Coding Agent 开发规范。未来所有 Codex 或其他 AI Coding Agent 在修改代码前必须阅读并遵守本文件，同时服从用户在当前任务中的明确指令。
 
 ## 1. Product Goal
@@ -149,4 +151,3 @@ LLM 不得成为数学评分的唯一事实来源，也不得编造无法从输�
 - 是否存在未提交修改需要保护？
 - 是否清楚区分确定性逻辑和 AI 能力？
 - 完成后将运行哪些验证？
-

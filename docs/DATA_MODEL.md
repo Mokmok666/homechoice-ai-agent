@@ -1,5 +1,7 @@
 # HomeChoice 数据模型规划
 
+> **历史文档说明：** 本文件是 Phase 0.5 的概念规划；`v1.0.0` 已实现 LocalStorage、Supabase 持久化与不可变 History snapshot。当前架构请以 [Architecture](./ARCHITECTURE.md) 和实际代码为准。
+
 ## 1. 设计目的
 
 本文档定义 HomeChoice 后续阶段的概念数据模型。当前 Phase 0.5 仅进行规划，不创建数据库、不连接 Supabase，也不实现数据持久化。

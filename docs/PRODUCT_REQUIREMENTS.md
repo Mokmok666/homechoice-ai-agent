@@ -1,5 +1,7 @@
 # HomeChoice 产品需求文档
 
+> **历史文档说明：** 本文件记录 Phase 0.5 的早期产品基线，部分“未来计划”已在 `v1.0.0` 实现，不再代表当前状态。请以 [README](../README.md)、[Case Study](./CASE_STUDY.md) 和 [Architecture](./ARCHITECTURE.md) 为准。
+
 ## 文档信息
 
 - 当前阶段：Phase 0.5 — Product Foundation & Engineering Alignment
@@ -99,4 +101,3 @@ AI 结合确定性规则生成比较分析
 - 用户能够理解分析结论如何受到自身偏好的影响；
 - AI 生成内容与确定性计算保持清晰边界；
 - 所有自动提取信息均可被用户检查和修正。
-
